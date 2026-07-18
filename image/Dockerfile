@@ -9,10 +9,17 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     sudo \
     procps \
+    ncurses-term \
     && rm -rf /var/lib/apt/lists/*
 
-# Create a non-root user with passwordless sudo so Claude can safely install system packages
-RUN useradd -ms /bin/bash dev && \
+# Non-root user with passwordless sudo. UID/GID are build args to match the host user on
+# Linux Docker; free the base image's `node` user (uid 1000) first so `dev` can take it.
+ARG USER_UID=1000
+ARG USER_GID=1000
+RUN userdel -r node 2>/dev/null || true; \
+    groupdel node 2>/dev/null || true; \
+    getent group $USER_GID >/dev/null 2>&1 || groupadd -g $USER_GID dev; \
+    useradd -u $USER_UID -g $USER_GID -ms /bin/bash dev && \
     echo "dev ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # Install Claude Code globally
