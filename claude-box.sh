@@ -51,6 +51,14 @@ fi
 GH_ENV=()
 [ -n "$GH_TOKEN" ] && GH_ENV=(--env "GH_TOKEN=$GH_TOKEN")
 
+# Terminal identity must cross into the box verbatim: claude branches per-terminal
+# rendering (welcome-mascot variant, color depth) on TERM_PROGRAM/COLORTERM, so
+# stripping or inventing these makes in-box rendering diverge from native.
+TERM_ENV=(--env TERM="${TERM:-xterm-256color}")
+for v in COLORTERM TERM_PROGRAM TERM_PROGRAM_VERSION; do
+  [ -n "${!v:-}" ] && TERM_ENV+=(--env "$v=${!v}")
+done
+
 container system start >/dev/null 2>&1 || true
 
 container run -it --rm \
@@ -59,9 +67,7 @@ container run -it --rm \
   --volume "$SANDBOX:/home/dev/.claude" \
   --volume "$SANDBOX_JSON:/home/dev/.claude.json" \
   --volume "$HISTORY:/home/dev/.claude/projects/$KEY" \
-  --env TERM="${TERM:-xterm-256color}" \
-  --env COLORTERM=truecolor \
-  --env FORCE_COLOR=3 \
+  "${TERM_ENV[@]}" \
   ${GH_ENV[@]+"${GH_ENV[@]}"} \
   claude-sandbox \
   claude "$@"
