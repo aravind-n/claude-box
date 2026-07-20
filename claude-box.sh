@@ -8,11 +8,73 @@ REAL_CLAUDE="$HOME/.claude"
 CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/claude-box"
 SANDBOX="$CACHE/sandbox"
 SANDBOX_JSON="$CACHE/sandbox.json"
+
+# `claude-box net ...` mutates the host-side egress policy that running boxes
+# read, then exits. This is the only way to change the policy — the box itself
+# has no path to it — so an in-box process can at most ask the user to run this.
+if [ "${1:-}" = net ]; then
+  shift
+  NET_STATE="$CACHE/net"; ALLOWLIST="$NET_STATE/allowlist"
+  MODE_FILE="$NET_STATE/mode"; DENY_LOG="$NET_STATE/denied.log"
+  mkdir -p "$NET_STATE"
+  cmd="${1:-status}"; [ $# -gt 0 ] && shift
+  case "$cmd" in
+    status)
+      mode="enforce"; [ -f "$MODE_FILE" ] && mode="$(cat "$MODE_FILE")"
+      n=0; [ -f "$ALLOWLIST" ] && n="$(grep -cvE '^[[:space:]]*(#|$)' "$ALLOWLIST" || true)"
+      echo "mode:    $mode"
+      echo "allowed: $n domain(s) ($ALLOWLIST)" ;;
+    denied)
+      if [ -s "$DENY_LOG" ]; then awk '{print $2}' "$DENY_LOG" | sort -u
+      else echo "no denials recorded this session"; fi ;;
+    allow)
+      [ $# -gt 0 ] || { echo "usage: claude-box net allow <domain>..." >&2; exit 2; }
+      tmp="$(mktemp "$NET_STATE/allowlist.XXXXXX")"
+      [ -f "$ALLOWLIST" ] && cat "$ALLOWLIST" > "$tmp"
+      for dom in "$@"; do grep -qxF "$dom" "$tmp" 2>/dev/null || printf '%s\n' "$dom" >> "$tmp"; done
+      chmod 666 "$tmp" 2>/dev/null || true
+      mv -f "$tmp" "$ALLOWLIST"   # atomic on the same fs; proxy re-reads on next request
+      echo "allowed: $*" ;;
+    open)   echo open   > "$MODE_FILE"; echo "egress guard OFF (open) — all public hosts allowed" ;;
+    guard)  echo enforce > "$MODE_FILE"; echo "egress guard ON (enforce) — allowlist enforced" ;;
+    report) echo report > "$MODE_FILE"; echo "egress guard REPORT — all allowed, denials logged" ;;
+    *) echo "usage: claude-box net {status|denied|allow <domain>...|open|guard|report}" >&2; exit 2 ;;
+  esac
+  exit 0
+fi
+
+# Consume wrapper-owned flags up front, then forward the rest to claude verbatim.
+# These must precede claude's own flags (e.g. `claude-box --open-net -- --model x`).
+OPEN_NET=0
+EXTRA_ALLOW=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --open-net) OPEN_NET=1; shift ;;
+    --allow) shift; [ $# -gt 0 ] || { echo "claude-box: --allow needs a domain" >&2; exit 2; }
+             IFS=',' read -ra _a <<< "$1"; EXTRA_ALLOW+=("${_a[@]}"); shift ;;
+    --allow=*) IFS=',' read -ra _a <<< "${1#--allow=}"; EXTRA_ALLOW+=("${_a[@]}"); shift ;;
+    --) shift; break ;;
+    *) break ;;
+  esac
+done
+
 PROJECT="$(pwd -P)"
 
 # Reproduce Claude's projects/<key> encoding so history unifies with native.
 KEY="$(printf '%s' "$PROJECT" | sed 's/[^A-Za-z0-9]/-/g')"
 HISTORY="$REAL_CLAUDE/projects/$KEY"
+
+# Container engine: explicit override wins, else auto-detect (container first, then
+# docker) to match the Makefile so build and run agree on the same engine.
+ENGINE="${CLAUDE_BOX_ENGINE:-${ENGINE:-}}"
+if [ -z "$ENGINE" ]; then
+  if command -v container >/dev/null 2>&1; then ENGINE=container
+  elif command -v docker >/dev/null 2>&1; then ENGINE=docker
+  else echo "claude-box: no container engine found; install Apple container or Docker" >&2; exit 1
+  fi
+fi
+command -v "$ENGINE" >/dev/null 2>&1 || { echo "claude-box: engine '$ENGINE' not found" >&2; exit 1; }
+IMAGE="${CLAUDE_BOX_IMAGE:-claude-sandbox}"
 
 mkdir -p "$SANDBOX" "$HISTORY"
 
@@ -34,7 +96,7 @@ copy_file() {
     || echo "claude-box: warning: could not copy '$1'" >&2
 }
 for d in skills commands agents; do copy_dir "$d"; done
-for f in settings.json CLAUDE.md statusline.sh; do copy_file "$f"; done
+for f in settings.json statusline.sh; do copy_file "$f"; done
 
 # Copy the config file
 if [ -f "$REAL_CLAUDE.json" ]; then
@@ -72,10 +134,128 @@ for v in COLORTERM TERM_PROGRAM TERM_PROGRAM_VERSION; do
   [ -n "${!v:-}" ] && TERM_ENV+=(--env "$v=${!v}")
 done
 
-container system start >/dev/null 2>&1 || true
+# Apple `container` needs its system service up; Docker manages its own daemon.
+if [ "$ENGINE" = container ]; then
+  container system start >/dev/null 2>&1 || true
+fi
 
-container run -it --rm \
+# --- Egress guard: policy state + proxy sidecar -------------------------------
+# The proxy enforces a domain allowlist; the box's in-container firewall pins all
+# egress to the proxy. Policy files live host-side (mounted into the proxy only),
+# so the box can never widen its own egress. See `claude-box net` for mutation.
+NET_STATE="$CACHE/net"
+ALLOWLIST="$NET_STATE/allowlist"
+MODE_FILE="$NET_STATE/mode"
+DENY_LOG="$NET_STATE/denied.log"
+PROXY_IMAGE="${CLAUDE_BOX_PROXY_IMAGE:-claude-box-proxy}"
+PROXY_PORT="${CLAUDE_BOX_PROXY_PORT:-8080}"
+NET_MODE=enforce
+[ "$OPEN_NET" = 1 ] && NET_MODE=open
+
+mkdir -p "$NET_STATE"; chmod 777 "$NET_STATE" 2>/dev/null || true
+# Seed a default allowlist on first run; never clobber later edits.
+if [ ! -f "$ALLOWLIST" ]; then
+  cat > "$ALLOWLIST" <<'ALLOW'
+# claude-box egress allowlist — one domain per line, matching the domain and its
+# subdomains. Edit freely, or run `claude-box net allow <domain>` while a box runs.
+api.anthropic.com
+claude.ai
+statsig.anthropic.com
+sentry.io
+github.com
+githubusercontent.com
+registry.npmjs.org
+pypi.org
+files.pythonhosted.org
+astral.sh
+mise.jdx.dev
+ALLOW
+fi
+# Session additions from --allow persist in the allowlist, like `net allow`.
+if [ "${#EXTRA_ALLOW[@]}" -gt 0 ]; then
+  for dom in "${EXTRA_ALLOW[@]}"; do
+    grep -qxF "$dom" "$ALLOWLIST" 2>/dev/null || printf '%s\n' "$dom" >> "$ALLOWLIST"
+  done
+fi
+printf '%s\n' "$NET_MODE" > "$MODE_FILE"
+: > "$DENY_LOG" 2>/dev/null || true; chmod 666 "$DENY_LOG" 2>/dev/null || true
+
+# Rebuild the disposable sandbox CLAUDE.md fresh each run (the host's global
+# CLAUDE.md, if any, plus a guard-aware section) so it tracks the mode and never
+# accumulates across runs.
+{
+  [ -f "$REAL_CLAUDE/CLAUDE.md" ] && cat "$REAL_CLAUDE/CLAUDE.md"
+  cat <<'BOXMD'
+
+# claude-box environment
+
+You are running inside claude-box: a container jailed to this project with a
+network egress guard. Adapt as follows:
+
+- **No sudo, no apt.** Install tools in user space: `mise use -g <tool>` for
+  runtimes (node, go, python, ...), `uv tool install <pkg>` for Python CLIs, and
+  `npm i -g <pkg>` after `mise use -g node` for npm CLIs.
+BOXMD
+  if [ "$NET_MODE" = open ]; then
+    cat <<'BOXMD'
+- **Network egress is unrestricted this session** (the guard is off via `--open-net`).
+BOXMD
+  else
+    cat <<'BOXMD'
+- **Network egress is allowlisted (default-deny).** A blocked request fails with
+  an error naming the domain. You cannot change the allowlist from inside the
+  box; tell the user the exact host(s) and ask them to run
+  `claude-box net allow <host>` on the host, then retry — no restart is needed.
+BOXMD
+  fi
+} > "$SANDBOX/CLAUDE.md"
+
+# Start the proxy sidecar (detached). The box and proxy share the default
+# network; the box's firewall restricts its egress to the proxy alone.
+PROXY_NAME="claude-box-proxy-$$"
+"$ENGINE" run -d --rm --name "$PROXY_NAME" \
+  --volume "$NET_STATE:/etc/claude-box" \
+  --env CLAUDE_BOX_ALLOWLIST=/etc/claude-box/allowlist \
+  --env CLAUDE_BOX_MODE_FILE=/etc/claude-box/mode \
+  --env CLAUDE_BOX_DENY_LOG=/etc/claude-box/denied.log \
+  --env "CLAUDE_BOX_PROXY_LISTEN=:$PROXY_PORT" \
+  "$PROXY_IMAGE" >/dev/null
+
+# Tear the proxy down when the box exits.
+cleanup() { "$ENGINE" stop "$PROXY_NAME" >/dev/null 2>&1 || true; }
+trap cleanup EXIT INT TERM
+
+# Resolve the proxy's IP (engines differ; retry until it has one).
+proxy_ip() {
+  if [ "$ENGINE" = docker ]; then
+    docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$PROXY_NAME" 2>/dev/null
+  else
+    # Apple container inspect JSON escapes the CIDR slash (192.168.64.73\/24),
+    # so pull the dotted quad straight off the first ipv4Address line.
+    container inspect "$PROXY_NAME" 2>/dev/null | grep -m1 ipv4Address | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}'
+  fi
+}
+PROXY_IP=""
+for _ in $(seq 1 30); do PROXY_IP="$(proxy_ip)"; [ -n "$PROXY_IP" ] && break; sleep 0.3; done
+[ -n "$PROXY_IP" ] || { echo "claude-box: proxy failed to start (is the '$PROXY_IMAGE' image built?)" >&2; exit 1; }
+PROXY_URL="http://$PROXY_IP:$PROXY_PORT"
+
+if [ "$NET_MODE" = open ]; then
+  echo "claude-box: network guard OFF (open) — all public egress allowed this session." >&2
+  [ -n "$GH_TOKEN" ] && echo "claude-box: a GitHub token is present in the box with the guard off." >&2
+fi
+
+# NET_ADMIN lets the entrypoint install the egress firewall (dropped before dev runs).
+"$ENGINE" run -it --rm \
+  --cap-add CAP_NET_ADMIN \
   --env CLAUDE_SANDBOX=1 \
+  --env "CLAUDE_BOX_NET=$NET_MODE" \
+  --env "CLAUDE_BOX_PROXY_IP=$PROXY_IP" \
+  --env "CLAUDE_BOX_PROXY_PORT=$PROXY_PORT" \
+  --env "HTTP_PROXY=$PROXY_URL" \
+  --env "HTTPS_PROXY=$PROXY_URL" \
+  --env "http_proxy=$PROXY_URL" \
+  --env "https_proxy=$PROXY_URL" \
   --volume "$PROJECT:$PROJECT" \
   --workdir "$PROJECT" \
   --volume "$SANDBOX:/home/dev/.claude" \
@@ -84,5 +264,5 @@ container run -it --rm \
   ${GIT_MOUNT[@]+"${GIT_MOUNT[@]}"} \
   "${TERM_ENV[@]}" \
   ${GH_ENV[@]+"${GH_ENV[@]}"} \
-  claude-sandbox \
+  "$IMAGE" \
   claude "$@"
