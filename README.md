@@ -15,7 +15,7 @@ The current project is bind-mounted at its real path; a sandbox copy of `~/.clau
 
 ```sh
 make            # build the claude-sandbox image
-./install.sh    # install the wrapper to /usr/local/bin (needs sudo)
+make install    # install the wrapper to /usr/local/bin (needs sudo)
 ```
 
 ## Usage
@@ -34,6 +34,8 @@ claude-box --model opus
 | `make` / `make build` | Build the image (default) |
 | `make rebuild` | Rebuild with no cache |
 | `make clean` | Remove the image |
+| `make install` | Install the wrapper to `/usr/local/bin` (needs sudo) |
+| `make uninstall` | Remove the installed wrapper |
 | `make ENGINE=docker …` | Force Docker instead of `container` |
 
 ## Notes
