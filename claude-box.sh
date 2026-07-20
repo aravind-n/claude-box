@@ -202,6 +202,7 @@ if [ ! -f "$ALLOWLIST" ]; then
 # subdomains. Edit freely, or run `claude-box net allow <domain>` while a box runs.
 api.anthropic.com
 claude.ai
+platform.claude.com
 statsig.anthropic.com
 sentry.io
 github.com
