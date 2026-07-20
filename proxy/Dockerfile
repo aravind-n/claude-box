@@ -6,11 +6,11 @@ WORKDIR /src
 COPY go.mod ./
 COPY main.go ./
 COPY egress ./egress
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /claude-box-proxy .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /berm-proxy .
 
 FROM scratch
-COPY --from=build /claude-box-proxy /claude-box-proxy
+COPY --from=build /berm-proxy /berm-proxy
 # Unprivileged; the proxy binds :8080 and needs no root.
 USER 65532:65532
 EXPOSE 8080
-ENTRYPOINT ["/claude-box-proxy"]
+ENTRYPOINT ["/berm-proxy"]
