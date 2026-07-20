@@ -1,3 +1,3 @@
-module claude-box/proxy
+module berm/proxy
 
 go 1.23

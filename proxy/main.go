@@ -1,4 +1,4 @@
-// Command claude-box-proxy is the egress guard for claude-box: an HTTP CONNECT
+// Command berm-proxy is the egress guard for berm: an HTTP CONNECT
 // (and plain-HTTP) forward proxy that permits outbound connections only to an
 // allowlisted set of domains. The guard logic lives in the egress package; this
 // entrypoint only reads configuration from the environment and wires it up.
@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"claude-box/proxy/egress"
+	"berm/proxy/egress"
 )
 
 func env(k, def string) string {
@@ -21,16 +21,16 @@ func env(k, def string) string {
 }
 
 func main() {
-	allowPath := env("CLAUDE_BOX_ALLOWLIST", "/etc/claude-box/allowlist")
-	modePath := env("CLAUDE_BOX_MODE_FILE", "/etc/claude-box/mode")
-	listen := env("CLAUDE_BOX_PROXY_LISTEN", ":8080")
+	allowPath := env("BERM_ALLOWLIST", "/etc/berm/allowlist")
+	modePath := env("BERM_MODE_FILE", "/etc/berm/mode")
+	listen := env("BERM_PROXY_LISTEN", ":8080")
 
 	policy := egress.NewPolicy(allowPath, modePath)
 	dialer := egress.SafeDialer{Timeout: 10 * time.Second}
-	denyLog := egress.NewDenyLog(env("CLAUDE_BOX_DENY_LOG", ""))
+	denyLog := egress.NewDenyLog(env("BERM_DENY_LOG", ""))
 	proxy := egress.NewProxy(policy, dialer, denyLog)
 
-	log.Printf("claude-box egress proxy on %s (allowlist=%s mode=%s)", listen, allowPath, modePath)
+	log.Printf("berm egress proxy on %s (allowlist=%s mode=%s)", listen, allowPath, modePath)
 	srv := &http.Server{
 		Addr:              listen,
 		Handler:           proxy,
