@@ -12,6 +12,11 @@ TAG        ?= latest
 IMAGE_REF  := $(IMAGE):$(TAG)
 DOCKERFILE ?= image/Dockerfile
 
+# The egress proxy sidecar image (see proxy/).
+PROXY_IMAGE ?= claude-box-proxy
+PROXY_REF   := $(PROXY_IMAGE):$(TAG)
+PROXY_DIR   ?= proxy
+
 # Where the wrapper installs. PREFIX/BINDIR override the destination.
 PREFIX   ?= /usr/local
 BINDIR   ?= $(PREFIX)/bin
@@ -33,16 +38,24 @@ RM_IMAGE := $(ENGINE) image delete
 endif
 
 .DEFAULT_GOAL := build
-.PHONY: build rebuild clean install uninstall
+.PHONY: build build-box build-proxy rebuild clean install uninstall
 
-build:
+# Build both images the wrapper needs: the box and its egress proxy sidecar.
+build: build-box build-proxy
+
+build-box:
 	$(ENGINE) build $(BUILD_ARGS) --tag $(IMAGE_REF) --file $(DOCKERFILE) image
+
+build-proxy:
+	$(ENGINE) build --tag $(PROXY_REF) --file $(PROXY_DIR)/Dockerfile $(PROXY_DIR)
 
 rebuild:
 	$(ENGINE) build --no-cache $(BUILD_ARGS) --tag $(IMAGE_REF) --file $(DOCKERFILE) image
+	$(ENGINE) build --no-cache --tag $(PROXY_REF) --file $(PROXY_DIR)/Dockerfile $(PROXY_DIR)
 
 clean:
 	-$(RM_IMAGE) $(IMAGE_REF)
+	-$(RM_IMAGE) $(PROXY_REF)
 
 # Install the wrapper into $(BINDIR) (needs sudo for the default /usr/local/bin).
 install:
