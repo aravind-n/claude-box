@@ -8,13 +8,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `claude-box.sh` — the wrapper: syncs a sandbox copy of `~/.claude`, then runs `claude "$@"` in a container with the project bind-mounted at its real absolute path.
 - `image/Dockerfile` + `image/entrypoint.sh` — the `claude-sandbox` image (`node:lts-slim` + Claude Code, plus python3/uv, gh, ripgrep/fd, zip/unzip; non-root `dev` user).
-- `Makefile` builds the image; `install.sh` installs the wrapper to `/usr/local/bin`.
+- `Makefile` builds the image and installs the wrapper to `/usr/local/bin` (`make install`).
 
 ## Commands
 
 - `make` / `make build` — build the image (default goal). `make rebuild` — no-cache build. `make clean` — remove the image.
 - `make ENGINE=docker ...` — force Docker; the engine auto-detects `container` first, then `docker`.
-- `./install.sh` — install `claude-box` to `/usr/local/bin` (needs sudo).
+- `make install` — install `claude-box` to `/usr/local/bin` (needs sudo). `make uninstall` removes it.
 - No tests or CI yet. To verify a change, rebuild the image and run `claude-box` in a throwaway project directory.
 
 ## Must-know invariants

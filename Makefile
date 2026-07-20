@@ -4,7 +4,7 @@
 ENGINE ?= $(shell if command -v container >/dev/null 2>&1; then echo container; \
 		  elif command -v docker >/dev/null 2>&1; then echo docker; fi)
 ifeq ($(strip $(ENGINE)),)
-	$(error No container engine found; install one or pass ENGINE=docker)
+  $(error No container engine found; install one or pass ENGINE=docker)
 endif
 
 IMAGE      ?= claude-sandbox
@@ -12,12 +12,18 @@ TAG        ?= latest
 IMAGE_REF  := $(IMAGE):$(TAG)
 DOCKERFILE ?= image/Dockerfile
 
+# Where the wrapper installs. PREFIX/BINDIR override the destination.
+PREFIX   ?= /usr/local
+BINDIR   ?= $(PREFIX)/bin
+WRAPPER  ?= claude-box.sh
+BIN_NAME ?= claude-box
+
 # Match the container user to your host UID/GID (native Linux Docker only).
 BUILD_ARGS :=
 ifeq ($(ENGINE),docker)
-	ifeq ($(shell uname -s),Linux)
-	BUILD_ARGS := --build-arg USER_UID=$(shell id -u) --build-arg USER_GID=$(shell id -g)
-endif
+  ifeq ($(shell uname -s),Linux)
+    BUILD_ARGS := --build-arg USER_UID=$(shell id -u) --build-arg USER_GID=$(shell id -g)
+  endif
 endif
 
 ifeq ($(ENGINE),docker)
@@ -27,7 +33,7 @@ RM_IMAGE := $(ENGINE) image delete
 endif
 
 .DEFAULT_GOAL := build
-.PHONY: build rebuild clean
+.PHONY: build rebuild clean install uninstall
 
 build:
 	$(ENGINE) build $(BUILD_ARGS) --tag $(IMAGE_REF) --file $(DOCKERFILE) image
@@ -37,3 +43,11 @@ rebuild:
 
 clean:
 	-$(RM_IMAGE) $(IMAGE_REF)
+
+# Install the wrapper into $(BINDIR) (needs sudo for the default /usr/local/bin).
+install:
+	sudo install -m 0755 $(WRAPPER) $(BINDIR)/$(BIN_NAME)
+	@echo "Installed $(BINDIR)/$(BIN_NAME) — run '$(BIN_NAME)' in any project."
+
+uninstall:
+	sudo rm -f $(BINDIR)/$(BIN_NAME)
