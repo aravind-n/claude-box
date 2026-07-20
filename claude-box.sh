@@ -34,7 +34,7 @@ copy_file() {
     || echo "claude-box: warning: could not copy '$1'" >&2
 }
 for d in skills commands agents; do copy_dir "$d"; done
-for f in settings.json CLAUDE.md;  do copy_file "$f"; done
+for f in settings.json CLAUDE.md statusline.sh; do copy_file "$f"; done
 
 # Copy the config file
 if [ -f "$REAL_CLAUDE.json" ]; then
