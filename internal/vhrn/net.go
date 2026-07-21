@@ -157,6 +157,20 @@ func (p netPolicy) writeMode(mode string) {
 	os.WriteFile(p.modeFile, []byte(mode+"\n"), 0o644)
 }
 
+// resolveMode picks the egress mode for a run: --open-net wins, else the config's
+// net.mode, else enforce. An unrecognized config value falls back to enforce.
+func resolveMode(configMode string, openNet bool) string {
+	if openNet {
+		return "open"
+	}
+	switch configMode {
+	case "enforce", "report", "open":
+		return configMode
+	default:
+		return "enforce"
+	}
+}
+
 func (p netPolicy) truncateDenyLog() {
 	os.WriteFile(p.denyLog, []byte{}, 0o666)
 	os.Chmod(p.denyLog, 0o666)
