@@ -20,8 +20,7 @@ type proxy struct {
 
 // startProxy launches the detached proxy sidecar and resolves its IP (engines
 // differ; retry until it has one).
-func startProxy(engine string, np netPolicy, port string) (*proxy, string, error) {
-	image := envOr("VHRN_PROXY_IMAGE", "vhrn-proxy")
+func startProxy(engine, image string, np netPolicy, port string) (*proxy, string, error) {
 	name := fmt.Sprintf("vhrn-proxy-%d", os.Getpid())
 	cmd := exec.Command(engine, "run", "-d", "--rm", "--name", name,
 		"--volume", np.dir+":/etc/vhrn",
