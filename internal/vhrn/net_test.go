@@ -32,6 +32,27 @@ func TestAllowlistSeedCountAndAtomicAdd(t *testing.T) {
 	}
 }
 
+func TestResolveMode(t *testing.T) {
+	cases := []struct {
+		cfg  string
+		open bool
+		want string
+	}{
+		{"", false, "enforce"},
+		{"enforce", false, "enforce"},
+		{"report", false, "report"},
+		{"open", false, "open"},
+		{"bogus", false, "enforce"},
+		{"report", true, "open"}, // --open-net wins over config
+		{"", true, "open"},
+	}
+	for _, c := range cases {
+		if got := resolveMode(c.cfg, c.open); got != c.want {
+			t.Errorf("resolveMode(%q, %v) = %q, want %q", c.cfg, c.open, got, c.want)
+		}
+	}
+}
+
 func TestDeniedDomains(t *testing.T) {
 	np := newNetPolicy(t.TempDir())
 	if err := np.ensure(); err != nil {
