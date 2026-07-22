@@ -10,6 +10,7 @@
 #![allow(dead_code)]
 
 mod cli;
+mod config;
 mod harness;
 
 pub use cli::run;
