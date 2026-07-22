@@ -3,28 +3,25 @@
 # so the heavy, slow-changing layers are built and cached once.
 FROM debian:trixie-slim
 
-# Baked-in CLI tooling. Installed at build time as root, so the container ships fully
-# equipped and never needs sudo at runtime. nftables is for the entrypoint's
-# egress firewall; ca-certificates for the https installers below.
+# Base packages: the entrypoint's egress firewall (nftables) and lock cleanup (procps),
+# terminal support, and the file/search CLIs an agent reaches for.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    git \
     curl \
-    jq \
-    less \
+    git \
+    nftables \
     procps \
     ncurses-term \
-    python3 \
-    python3-venv \
+    less \
+    jq \
     ripgrep \
     fd-find \
     zip \
     unzip \
-    nftables \
     && ln -s "$(command -v fdfind)" /usr/local/bin/fd \
     && rm -rf /var/lib/apt/lists/*
 
-# GitHub CLI from its official apt repo — arch-aware, so arm64 (Apple container) and x86_64 both work.
+# GitHub CLI from its own apt repo — arch-aware, so arm64 and x86_64 both work.
 RUN mkdir -p -m 755 /etc/apt/keyrings \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
     && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
@@ -32,10 +29,27 @@ RUN mkdir -p -m 755 /etc/apt/keyrings \
     && apt-get update && apt-get install -y gh \
     && rm -rf /var/lib/apt/lists/*
 
-# uv (Python) and mise (runtime manager) installed system-wide so the
-# unprivileged dev user gets them on PATH — the sudo-free path to more tools.
-RUN curl -LsSf https://astral.sh/uv/install.sh \
-    | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
+# Basic C toolchain — cc + libc headers, so native builds work.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    clang \
+    lld \
+    llvm \
+    libc6-dev \
+    make \
+    pkg-config \
+    && ln -sf "$(command -v clang)" /usr/local/bin/cc \
+    && ln -sf "$(command -v clang++)" /usr/local/bin/c++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python: the system interpreter plus uv, its package/venv manager.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-venv \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -LsSf https://astral.sh/uv/install.sh \
+       | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
+
+# mise: extra language runtimes on demand (go, node, …).
 RUN curl -fsSL https://mise.run | env MISE_INSTALL_PATH=/usr/local/bin/mise sh
 
 # Non-root user. UID/GID are build args to match the host user on Linux Docker;
