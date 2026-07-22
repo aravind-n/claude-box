@@ -3,15 +3,14 @@ name = "vhrn"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+description = "Run coding agents in a filesystem- and network-jailed container"
+repository = "https://github.com/aravind-n/vhrn"
+keywords = ["sandbox", "container", "agent", "egress", "cli"]
+categories = ["command-line-utilities", "development-tools", "virtualization"]
 
 [lints.clippy]
-# cargo_common_metadata still wants description/repository/keywords/categories (crates.io
-# publishing fields); vhrn ships as a GitHub-release binary, not a published crate, so
-# that lint stays allowed even with the license declared. Both groups sit below the
-# override's priority, else Cargo's lint_groups_priority rejects the group + member.
-cargo = { level = "warn", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
-cargo_common_metadata = "allow"
+cargo = "warn"
+pedantic = "warn"
 
 [dependencies]
 anyhow = "1.0.104"
