@@ -14,6 +14,7 @@ mod config;
 mod env;
 mod harness;
 mod image;
+mod logging;
 mod net;
 mod persist;
 mod run;
@@ -23,3 +24,4 @@ mod shell;
 mod testutil;
 
 pub use cli::run;
+pub use logging::init_logging;
