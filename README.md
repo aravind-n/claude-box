@@ -1,30 +1,28 @@
-# vhrn (Virtual Harness)
+# vhrn (Virtualized Harness Runtime)
 
 Run coding agents inside a container jailed to the current project directory, with
-**default-deny network egress**. Claude Code is the harness that ships today; the CLI
-is harness-agnostic (`vhrn install <harness>` / `vhrn <harness> …`), so more agents
-can be added as thin images.
+**default-deny network egress**. The CLI is harness-agnostic (`vhrn install <harness>`
+/ `vhrn <harness> …`), so new agents can be added as thin images.
 
-Only the current project is mounted into the container, so `~/.ssh`, your other projects,
+Only the current project is mounted into the container, so your credentials, other projects,
 and the rest of your home directory stay outside it. Outbound traffic is limited to
-an allowlist. Between them, those two things let you run
-`--dangerously-skip-permissions` without a prompt injection being able to reach the
-rest of your machine or push your project somewhere it shouldn't go.
+an allowlist.
 
 The project is bind-mounted at its real path. Each harness keeps a persistent,
-container-owned state store (login, credentials, trust) so an in-container login sticks across
-runs; a disposable copy of your `~/.claude` config (skills, commands, agents,
-settings) is synced in on each run and layered on top, and session history is written
-back to `~/.claude/projects/<key>` so in-container and native sessions share history.
+container-owned state store (login, credentials, trust) so an in-container login sticks
+across runs; a disposable copy of your host harness config (skills, commands, agents,
+harness settings) is synced in on each run and layered on top. Session history is written
+back to the host so in-container and native sessions share it.
 
 ## Requirements
 
 - [Apple Container](https://github.com/apple/container) or Docker (auto-detected, `container` first)
 - `gh` on the host if you want GitHub auth forwarded (optional)
-- Rust 1.85+ / edition 2024 (only to build the CLI from source; the curl installer ships a prebuilt binary)
+- Rust 1.85+ / edition 2024 (only to build the CLI from source; the curl installer ships
+  a prebuilt binary)
 
-Claude Code does **not** need to be installed on the host — the agent binary is baked
-into the container image.
+The harness itself does **not** need to be installed on the host. vhrn launches a container
+with the harness binary on it.
 
 ## Install
 
@@ -33,23 +31,23 @@ alias):
 
 ```sh
 cargo install --path .   # build and install the vhrn binary to ~/.cargo/bin
-vhrn install claude      # pull the claude + proxy images, seed egress, add a `claude` alias
+vhrn install <harness>      # pull the harness + proxy images, seed egress, add a harness alias
 ```
 
 Or grab a prebuilt binary, then install the harness:
 
 ```sh
 curl -fsSL https://aravind-n.github.io/vhrn/install.sh | sh
-vhrn install claude
+vhrn install <harness>
 ```
 
 `vhrn install` pulls prebuilt, versioned images from ghcr — no repo checkout and no
 local image build. Pin or roll back a version with `@`:
 
 ```sh
-vhrn install claude           # the latest release
-vhrn install claude@v0.2.0    # a specific release (rollback works the same way)
-vhrn install claude@nightly   # the latest master build
+vhrn install <harness>           # the latest release
+vhrn install <harness>@v0.2.0    # a specific release (rollback works the same way)
+vhrn install <harness>@nightly   # the latest master build
 ```
 
 For the CLI itself, `VHRN_VERSION` pins the installer to a tag (`VHRN_VERSION=nightly`
@@ -58,28 +56,30 @@ or `VHRN_VERSION=v0.2.0`); the default is the latest stable release.
 For development, build the images locally and install from those instead of pulling:
 
 ```sh
-make -C image && make -C proxy   # build base/claude + proxy locally
-vhrn install claude --local      # register the make-built images
+make -C image && make -C proxy   # build base/harness images + proxy locally
+vhrn install <vhrn> --local      # register the make-built images
 ```
 
 Restart your shell (or source your rc file) afterward to pick up the alias.
 
 ## Usage
 
-vhrn is subcommand-first. After `vhrn install claude`, a shell alias lets you run
-`claude` directly; `command claude` or `\claude` still reaches the real binary.
+vhrn is subcommand-first. After `vhrn install <harness>`, a shell alias lets you run
+the harness command directly (example `claude` is aliased to `vhrn claude`);
+`command <harness>` or `\<harness>` still reaches the real binary.
 
 ```sh
-vhrn claude                   # guarded: egress limited to the allowlist
-vhrn claude --model opus      # forwards --model opus to claude
-claude --model opus           # same, via the installed alias
-vhrn claude --allow docs.rs   # add domains to the allowlist for this session
-vhrn claude --open-net        # drop the guard for this session (all egress)
-vhrn claude -- --help         # claude's own help (-- stops wrapper flag parsing)
+vhrn <harness>                   # guarded: egress limited to the allowlist
+vhrn <harness> --some_option      # forwards --model opus to <harness>
+<harness> --some_option           # same, via the installed alias
+vhrn <harness> --allow docs.rs   # add domains to the allowlist for this session
+vhrn <harness> --open-net        # drop the guard for this session (all egress)
+vhrn <harness> -- --help         # harness's own help (-- stops wrapper flag parsing)
 
 vhrn list                     # known + installed harnesses
-vhrn uninstall claude         # drop the alias/registry entry (add --image to delete the image)
-vhrn help
+vhrn uninstall <harness>         # drop the alias/registry entry (add --image to delete the image)
+vhrn help                     # usage
+vhrn --version                # version
 ```
 
 Wrapper flags (`--open-net`, `--allow`) go after the harness name and before the
@@ -88,7 +88,7 @@ agent's own flags.
 ## Login and state persistence
 
 Each harness has a persistent store at `~/.cache/vhrn/state/<harness>/`, mounted as
-the agent's config dir inside the container (Claude via `CLAUDE_CONFIG_DIR`). A login,
+the harness's config dir inside the container. A login,
 refreshed credentials, and trust state live there and survive across runs — one login
 serves every project. The store is authoritative once populated: your host login is
 copied in **only** to bootstrap an empty store, so an in-container login is never
@@ -150,26 +150,35 @@ the image name, in-container command, shell alias, default egress domains, and t
 persistence descriptors (state dir, synced config, bootstrap credentials). No fork of
 the CLI is required.
 
-## Make targets
+## Building from source
 
-`image/Makefile` builds the base and harness images (run it from the repo root as `make
--C image`); `proxy/Makefile` builds the proxy image (`make -C proxy`) — each module owns
-its own image. The CLI is built and tested by cargo (`cargo build --release`, `cargo
-test`) and the proxy by `cd proxy && go test ./...`.
+The repo is a small monorepo with three parts, each built by its own tool. There is no
+root build wrapper — invoke them directly:
 
-| Target | Description |
-| --- | --- |
-| `make -C image` | Build the base + harness images (base + claude) |
-| `make -C proxy` | Build the proxy image |
-| `make -C image build-base` / `build-claude` | Build one harness image |
-| `make -C image clean` / `make -C proxy clean` | Remove the images |
-| `make -C image ENGINE=docker ...` | Force Docker instead of `container` |
+| Part | Source | Build | Test |
+| --- | --- | --- | --- |
+| CLI (`vhrn`) | `src/` (Rust) | `cargo build --release` | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` |
+| Container images | `image/` (base + harnesses) | `make -C image` | — |
+| Egress proxy | `proxy/` (Go) | `make -C proxy` | `cd proxy && go test ./...` |
 
-Day to day you don't need `make` — `vhrn install <harness>` pulls prebuilt images from
-ghcr. `make -C image && make -C proxy` builds them locally for development (`vhrn install <harness>
---local` then uses those). CI builds and pushes the images (`nightly` on master,
-`vX.Y.Z` + `latest` on a tag); `VHRN_REGISTRY` overrides the registry the CLI pulls from.
-See [docs/RELEASING.md](docs/RELEASING.md) for the CI/CD flow.
+`cargo install --path .` builds and installs the CLI to `~/.cargo/bin`. The image
+makefiles auto-detect the engine (`container`, then `docker`; override with
+`ENGINE=docker`); `make -C image build-base`/`build-claude` build a single image, and
+`make -C image clean` / `make -C proxy clean` remove them.
+
+Day to day you need none of this — `vhrn install <harness>` pulls prebuilt, versioned
+images from ghcr. To iterate on the images locally, build them and register with
+`--local`:
+
+```sh
+cargo install --path .            # the CLI
+make -C image && make -C proxy    # base + harness + proxy images
+vhrn install <harness> --local       # use the locally-built images
+```
+
+CI builds and pushes the images (`nightly` on master, `vX.Y.Z` + `latest` on a tag) and
+cross-compiles the CLI binaries; `VHRN_REGISTRY` overrides the registry the CLI pulls
+from. See [docs/RELEASING.md](docs/RELEASING.md) for the full CI/CD flow.
 
 ## Threat model
 
@@ -201,8 +210,8 @@ What it doesn't:
   `gh auth token`), which covers git-over-HTTPS inside the container. SSH remotes stay
   unauthenticated. Under an open guard, the wrapper warns that a token is present.
 - The disposable config copy under `~/.cache/vhrn/sandbox/` is re-synced every run, so
-  edits to it don't survive — change your real `~/.claude` on the host instead. The
-  persistent store under `~/.cache/vhrn/state/` is separate and is never touched by the
-  sync.
+  edits to it don't survive — change your real host harness config instead (example `~/.claude`
+  for Claude). The persistent store under `~/.cache/vhrn/state/` is separate and is never
+  touched by the sync.
 - Your host `~/.gitconfig` is copied in so in-container commits use your name and email.
   Change the host file if you want a change to stick.
