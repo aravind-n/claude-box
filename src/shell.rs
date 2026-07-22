@@ -62,10 +62,6 @@ pub(crate) fn installed_version(config_dir: &Path, name: &str) -> Option<String>
     read_installed(config_dir).into_iter().find(|h| h.name == name).map(|h| h.version)
 }
 
-fn is_installed(config_dir: &Path, name: &str) -> bool {
-    installed_version(config_dir, name).is_some()
-}
-
 /// Write the registry atomically (same-dir temp + rename), sorted and de-duplicated
 /// by name, one "name version" per line.
 pub(crate) fn write_installed(config_dir: &Path, hs: &[InstalledHarness]) -> std::io::Result<()> {
@@ -270,7 +266,7 @@ mod tests {
     fn installed_registry_add_update_remove() {
         let dir = temp_dir();
         assert!(read_installed(&dir).is_empty(), "fresh registry should be empty");
-        assert!(!is_installed(&dir, "claude"));
+        assert!(installed_version(&dir, "claude").is_none());
 
         add_installed(&dir, "claude", "v0.2.0").unwrap();
         add_installed(&dir, "codex", "latest").unwrap();

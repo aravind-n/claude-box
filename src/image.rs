@@ -11,7 +11,6 @@ use tracing::info;
 
 use crate::harness::Harness;
 
-const BASE_IMAGE_NAME: &str = "vhrn-base";
 const PROXY_IMAGE_NAME: &str = "vhrn-proxy";
 const DEFAULT_REGISTRY: &str = "ghcr.io/aravind-n";
 /// Marks a make-built image used as-is (bare name, no registry) rather than one
