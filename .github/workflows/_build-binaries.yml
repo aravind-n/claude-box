@@ -1,0 +1,69 @@
+# Reusable: cross-compile the vhrn CLI for macOS and Linux (arm64/amd64) and upload each
+# as an artifact. Asset names vhrn-<os>-<arch> are load-bearing — the installer fetches by
+# them. Linux is static musl (via cross); macOS is native per arch. inputs.version bakes
+# into the binary as VHRN_BUILD_VERSION (what `vhrn --version` reports).
+name: build-binaries
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-14
+            asset: vhrn-darwin-arm64
+            cross: false
+          - target: x86_64-apple-darwin
+            runner: macos-14
+            asset: vhrn-darwin-amd64
+            cross: false
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-latest
+            asset: vhrn-linux-arm64
+            cross: true
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+            asset: vhrn-linux-amd64
+            cross: true
+    runs-on: ${{ matrix.runner }}
+    env:
+      VHRN_BUILD_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust (latest stable)
+        run: |
+          rustup update stable
+          rustup default stable
+      - name: Add target
+        if: ${{ !matrix.cross }}
+        run: rustup target add ${{ matrix.target }}
+      - name: Install cross
+        if: ${{ matrix.cross }}
+        uses: taiki-e/install-action@cross
+      - name: Build
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cross build --release --locked --target ${{ matrix.target }}
+          else
+            cargo build --release --locked --target ${{ matrix.target }}
+          fi
+      - name: Stage asset
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/vhrn" "dist/${{ matrix.asset }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error

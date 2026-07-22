@@ -1,0 +1,4 @@
+# Forward the CI-baked version into the cross build container so `vhrn --version`
+# reports it on the musl (Linux) targets too.
+[build.env]
+passthrough = ["VHRN_BUILD_VERSION"]

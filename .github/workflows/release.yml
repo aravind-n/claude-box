@@ -1,79 +1,77 @@
-# Cross-compile the vhrn CLI for macOS and Linux (arm64/amd64) and attach the raw
-# binaries to the GitHub Release for a `vX.Y.Z` tag. scripts/install.sh fetches them
-# by `vhrn-<os>-<arch>`, so the asset names are load-bearing. Linux builds are static
-# musl (via cross); macOS builds are native per arch. A branch workflow_dispatch runs
-# the builds without publishing, to smoke-test the matrix.
+# A vX.Y.Z tag cuts a release: full suite, then — after a maintainer approves the
+# `release` environment — the release images and a GitHub Release with the CLI binaries
+# and their checksums. Only maintainers can create v* tags (repo ruleset); see
+# docs/RELEASING.md.
 name: release
 
 on:
   push:
-    tags: ["v*"]
-  workflow_dispatch:
+    tags: ['v*.*.*']
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: aarch64-apple-darwin
-            runner: macos-14
-            asset: vhrn-darwin-arm64
-            cross: false
-          - target: x86_64-apple-darwin
-            runner: macos-13
-            asset: vhrn-darwin-amd64
-            cross: false
-          - target: aarch64-unknown-linux-musl
-            runner: ubuntu-latest
-            asset: vhrn-linux-arm64
-            cross: true
-          - target: x86_64-unknown-linux-musl
-            runner: ubuntu-latest
-            asset: vhrn-linux-amd64
-            cross: true
-    runs-on: ${{ matrix.runner }}
+  guard:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      # Edition 2024 needs Rust >= 1.85; cross builds with the host toolchain, so
-      # this also governs the musl builds.
-      - name: Set up Rust (latest stable)
+      - name: Tag must match Cargo.toml version
         run: |
-          rustup update stable
-          rustup default stable
+          tag="${GITHUB_REF_NAME#v}"
+          crate=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          [ "$tag" = "$crate" ] || { echo "tag ${GITHUB_REF_NAME} != Cargo.toml $crate"; exit 1; }
 
-      - name: Add target
-        if: ${{ !matrix.cross }}
-        run: rustup target add ${{ matrix.target }}
+  # The maintainer gate: the `release` environment's required reviewers pause here,
+  # before anything is built or published.
+  approve:
+    needs: guard
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - run: echo "release ${GITHUB_REF_NAME} approved"
 
-      - name: Install cross
-        if: ${{ matrix.cross }}
-        uses: taiki-e/install-action@cross
+  test:
+    needs: approve
+    uses: ./.github/workflows/_test.yml
 
-      - name: Build
-        run: |
-          if [ "${{ matrix.cross }}" = "true" ]; then
-            cross build --release --locked --target ${{ matrix.target }}
-          else
-            cargo build --release --locked --target ${{ matrix.target }}
-          fi
+  images:
+    needs: [approve, test]
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/_build-images.yml
+    with:
+      flavor: release
+      push: true
 
-      - name: Stage asset
-        run: |
-          mkdir -p dist
-          cp "target/${{ matrix.target }}/release/vhrn" "dist/${{ matrix.asset }}"
+  binaries:
+    needs: [approve, test]
+    uses: ./.github/workflows/_build-binaries.yml
+    with:
+      version: ${{ github.ref_name }}
 
-      # Only publish on a tag. Idempotent create tolerates the matrix race and a
-      # re-run; --clobber replaces an existing asset.
-      - name: Publish to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+  publish:
+    needs: [images, binaries]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum vhrn-* > SHA256SUMS
+      - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag="${GITHUB_REF_NAME}"
-          gh release create "$tag" --title "$tag" --generate-notes 2>/dev/null || true
-          gh release upload "$tag" "dist/${{ matrix.asset }}" --clobber
+          gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --generate-notes 2>/dev/null || true
+          gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
