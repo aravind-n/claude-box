@@ -49,9 +49,9 @@ Environment:
 /// Entry point: dispatch argv (already stripped of the program name) and return a
 /// process exit code, matching the Go `vhrn.Run`.
 ///
-/// Port in progress — `help`/`net`/`list` and running a harness are wired now;
-/// `install`/`uninstall` land at the cutover phase and until then fall through to
-/// usage.
+/// Port in progress — `help`/`net`/`install`/`uninstall`/`list` and running a harness
+/// are wired now; an unknown command still falls through to usage (the exit-2 path
+/// lands at the cutover phase).
 pub fn run(args: Vec<String>) -> i32 {
     match args.first().map(String::as_str) {
         None | Some("help" | "-h" | "--help") => {
@@ -59,6 +59,8 @@ pub fn run(args: Vec<String>) -> i32 {
             0
         }
         Some("net") => crate::net::run_net(&args[1..]),
+        Some("install") => run_install(&args[1..]),
+        Some("uninstall") => run_uninstall(&args[1..]),
         Some("list") => run_list(&args[1..]),
         // A known harness runs that agent; the wrapper's own flags come right after
         // it, then everything else forwards to the agent verbatim.
@@ -78,7 +80,8 @@ pub fn run(args: Vec<String>) -> i32 {
                     2
                 }
             },
-            // install/uninstall + unknown-command handling arrive at the cutover phase.
+            // Unknown-command handling (exit 2) arrives at the cutover phase; until
+            // then an unrecognized command falls through to usage.
             None => {
                 print!("{USAGE}");
                 0
@@ -105,6 +108,146 @@ fn run_list(_args: &[String]) -> i32 {
             None => println!("  {name:<12} available"),
         }
     }
+    0
+}
+
+/// Pull a harness's image and the matching-version proxy from the registry, union its
+/// egress domains into the allowlist, record the harness+version in the installed
+/// registry, and write shell aliases. `--local` uses images already built by `make`
+/// instead of pulling (for development/offline). Mirrors Go's runInstall (install.go).
+fn run_install(args: &[String]) -> i32 {
+    let mut arg = String::new();
+    let mut local = false;
+    for a in args {
+        if a == "--local" {
+            local = true;
+        } else if arg.is_empty() {
+            arg = a.clone();
+        }
+    }
+    if arg.is_empty() {
+        eprintln!("usage: vhrn install <harness>[@version] [--local]");
+        return 2;
+    }
+    let (name, mut version) = crate::image::parse_harness_arg(&arg);
+    if local {
+        version = crate::image::LOCAL_VERSION.to_string();
+    }
+    let Some(h) = crate::harness::lookup_harness(&name) else {
+        eprintln!(
+            "vhrn: unknown harness {name:?} (known: {})",
+            crate::harness::harness_names().join(", ")
+        );
+        return 2;
+    };
+    let home = match crate::run::home_dir() {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("vhrn: {e}");
+            return 1;
+        }
+    };
+    let engine = match crate::run::detect_engine() {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("vhrn: {e}");
+            return 1;
+        }
+    };
+
+    if let Err(e) = crate::image::provision_images(&engine, &crate::image::registry_base(), &h, &version) {
+        eprintln!("vhrn: {e}");
+        return 1;
+    }
+
+    // Union base defaults + this harness's domains into the host allowlist,
+    // append-if-missing so later user edits are respected.
+    if let Err(e) = crate::net::seed_allowlist(&crate::run::vhrn_cache(&home), &h.allow_domains) {
+        eprintln!("vhrn: {e}");
+        return 1;
+    }
+
+    let config_dir = crate::shell::vhrn_config_dir(&home);
+    if let Err(e) = crate::shell::add_installed(&config_dir, &name, &version) {
+        eprintln!("vhrn: {e}");
+        return 1;
+    }
+    if let Err(e) = crate::shell::sync_aliases(&config_dir, &home, crate::shell::current_shell().as_deref()) {
+        eprintln!("vhrn: warning: could not update shell aliases: {e}");
+    }
+
+    println!(
+        "Installed {name} ({version}). Restart your shell (or source your rc file) to use `{}`.",
+        h.alias
+    );
+    0
+}
+
+/// Drop a harness from the installed registry and regenerate the shell aliases so its
+/// alias disappears. With `--image` it also deletes the harness image (the shared base
+/// and proxy are left in place for other harnesses). Mirrors Go's runUninstall.
+fn run_uninstall(args: &[String]) -> i32 {
+    let mut name = String::new();
+    let mut rm_image = false;
+    for a in args {
+        if a == "--image" {
+            rm_image = true;
+        } else if name.is_empty() {
+            name = a.clone();
+        }
+    }
+    if name.is_empty() {
+        eprintln!("usage: vhrn uninstall <harness> [--image]");
+        return 2;
+    }
+    let home = match crate::run::home_dir() {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("vhrn: {e}");
+            return 1;
+        }
+    };
+    let config_dir = crate::shell::vhrn_config_dir(&home);
+
+    // Capture the version before dropping the entry, so --image deletes the exact ref
+    // that was installed (a versioned registry ref, or the bare local name).
+    let version = crate::shell::installed_version(&config_dir, &name);
+
+    if let Err(e) = crate::shell::remove_installed(&config_dir, &name) {
+        eprintln!("vhrn: {e}");
+        return 1;
+    }
+    if let Err(e) = crate::shell::sync_aliases(&config_dir, &home, crate::shell::current_shell().as_deref()) {
+        eprintln!("vhrn: warning: could not update shell aliases: {e}");
+    }
+
+    let mut alias = name.clone();
+    match crate::harness::lookup_harness(&name) {
+        Some(h) => {
+            alias = h.alias.clone();
+            if rm_image && version.is_none() {
+                eprintln!("vhrn: {name:?} was not installed; no image to remove");
+            } else if rm_image && let Ok(engine) = crate::run::detect_engine() {
+                let img = crate::image::harness_image_ref(
+                    &crate::image::registry_base(),
+                    &h,
+                    version.as_deref().unwrap_or(""),
+                );
+                eprintln!("vhrn: removing image {img}...");
+                if let Err(e) = crate::image::remove_image(&engine, &img) {
+                    eprintln!("vhrn: warning: could not remove image {img}: {e}");
+                }
+            }
+        }
+        // Unknown harness: nothing to alias, and no image ref we can form to remove.
+        None => {
+            if rm_image {
+                eprintln!("vhrn: warning: unknown harness {name:?}; cannot remove its image");
+            }
+        }
+    }
+
+    println!("Uninstalled {name}. Restart your shell to drop the `{alias}` alias.");
     0
 }
 
