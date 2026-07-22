@@ -60,6 +60,41 @@ pub(crate) fn set_mode(path: &Path, mode: u32) -> std::io::Result<()> {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
 }
 
+/// The container engine to use: an explicit `VHRN_ENGINE` (then `ENGINE`) wins, else
+/// auto-detect `container` first, then `docker` — matching the Makefile so build and
+/// run agree. Split from the env read so it is testable without touching env.
+fn detect_engine_from(vhrn_engine: Option<&str>, engine: Option<&str>) -> Result<String> {
+    let explicit = vhrn_engine
+        .filter(|s| !s.is_empty())
+        .or_else(|| engine.filter(|s| !s.is_empty()));
+    let chosen = match explicit {
+        Some(e) => e.to_string(),
+        None if look_path("container") => "container".to_string(),
+        None if look_path("docker") => "docker".to_string(),
+        None => bail!("no container engine found; install Apple container or Docker"),
+    };
+    if !look_path(&chosen) {
+        bail!("engine {chosen:?} not found");
+    }
+    Ok(chosen)
+}
+
+/// The container engine, reading `VHRN_ENGINE`/`ENGINE` at the edge.
+pub(crate) fn detect_engine() -> Result<String> {
+    detect_engine_from(
+        std::env::var("VHRN_ENGINE").ok().as_deref(),
+        std::env::var("ENGINE").ok().as_deref(),
+    )
+}
+
+/// The value of env var `key`, or `def` when unset or empty.
+pub(crate) fn env_or(key: &str, def: &str) -> String {
+    match std::env::var(key) {
+        Ok(v) if !v.is_empty() => v,
+        _ => def.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,5 +118,16 @@ mod tests {
         // Empty or unset falls back to ~/.cache, like Go's getenv == "".
         assert_eq!(vhrn_cache_from(home, Some("")), Path::new("/home/u/.cache/vhrn"));
         assert_eq!(vhrn_cache_from(home, None), Path::new("/home/u/.cache/vhrn"));
+    }
+
+    #[test]
+    fn detect_engine_explicit_override() {
+        // `ls` stands in for a real engine binary so the test is deterministic.
+        assert_eq!(detect_engine_from(Some("ls"), None).unwrap(), "ls");
+    }
+
+    #[test]
+    fn detect_engine_explicit_missing() {
+        assert!(detect_engine_from(Some("vhrn-no-such-engine-xyz"), None).is_err());
     }
 }
