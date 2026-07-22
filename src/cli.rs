@@ -1,6 +1,4 @@
-//! Subcommand dispatch, run-flag parsing, and the usage text — the CLI's front
-//! door (mirrors the Go cli.go + flags.go + usage.go). Full dispatch lands in a
-//! later port phase; for now `run` prints the usage text.
+//! Subcommand dispatch, run-flag parsing, and the usage text — the CLI's front door.
 
 use anyhow::{Result, bail};
 use tracing::{error, info, warn};
@@ -47,12 +45,8 @@ Environment:
   VHRN_PROXY_PORT    proxy port (default: 8080)
 ";
 
-/// Entry point: dispatch argv (already stripped of the program name) and return a
-/// process exit code, matching the Go `vhrn.Run`.
-///
-/// Port in progress — `help`/`net`/`install`/`uninstall`/`list` and running a harness
-/// are wired now; an unknown command still falls through to usage (the exit-2 path
-/// lands at the cutover phase).
+/// Dispatch argv (already stripped of the program name) and return a process exit
+/// code. Bare `vhrn` and `help` print usage; an unknown command is an error (exit 2).
 pub fn run(args: &[String]) -> i32 {
     match args.first().map(String::as_str) {
         None | Some("help" | "-h" | "--help") => {
@@ -83,10 +77,8 @@ pub fn run(args: &[String]) -> i32 {
                     }
                 }
             } else {
-                // Unknown-command handling (exit 2) arrives at the cutover phase; until
-                // then an unrecognized command falls through to usage.
-                print!("{USAGE}");
-                0
+                eprintln!("vhrn: unknown command {cmd:?} — run 'vhrn help'");
+                2
             }
         }
     }
@@ -312,6 +304,11 @@ mod tests {
     fn run_prints_usage_and_succeeds() {
         assert_eq!(run(&[]), 0);
         assert_eq!(run(&["help".to_string()]), 0);
+    }
+
+    #[test]
+    fn run_unknown_command_exits_2() {
+        assert_eq!(run(&["definitely-not-a-command".to_string()]), 2);
     }
 
     #[test]
