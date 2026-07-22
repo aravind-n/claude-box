@@ -7,6 +7,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
+use tracing::info;
 
 use crate::harness::Harness;
 
@@ -98,7 +99,7 @@ pub(crate) fn provision_images(engine: &str, registry: &str, h: &Harness, versio
     }
     // Pull the proxy first, then the harness; either failure aborts the install.
     for img in [proxy_img.as_str(), harness_img.as_str()] {
-        eprintln!("vhrn: pulling {img}...");
+        info!("pulling {img}...");
         pull_image(engine, img).with_context(|| format!("pulling {img}"))?;
     }
     Ok(())
@@ -253,7 +254,7 @@ pub(crate) fn ensure_toolchain_image(
     let tmp = build_temp_dir()?;
     let dockerfile = tmp.join("Dockerfile");
     std::fs::write(&dockerfile, toolchain_dockerfile(from_image, &norm))?;
-    eprintln!("vhrn: provisioning toolchain ({}) into {tag}...", norm.join(", "));
+    info!("provisioning toolchain ({}) into {tag}...", norm.join(", "));
     let result = build_image(engine, &tag, &dockerfile.to_string_lossy(), &tmp.to_string_lossy(), &[]);
     let _ = std::fs::remove_dir_all(&tmp);
     result?;

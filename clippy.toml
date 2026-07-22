@@ -1,0 +1,2 @@
+# syn is pulled at 2.x by tracing-attributes and 3.x by serde_derive.
+allowed-duplicate-crates = ["syn"]
