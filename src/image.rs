@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
 
 use crate::harness::Harness;
@@ -34,7 +34,7 @@ pub(crate) fn registry_base() -> String {
 
 /// Split "claude" or "claude@v0.2.0" into name and version, defaulting to "latest"
 /// when no @tag (or a bare trailing @) is given.
-fn parse_harness_arg(arg: &str) -> (String, String) {
+pub(crate) fn parse_harness_arg(arg: &str) -> (String, String) {
     match arg.split_once('@') {
         Some((name, version)) => {
             let version = if version.is_empty() { "latest" } else { version };
@@ -63,6 +63,88 @@ pub(crate) fn proxy_image_ref(registry: &str, version: &str) -> String {
     } else {
         format!("{registry}/{PROXY_IMAGE_NAME}:{version}")
     }
+}
+
+// ---- registry image delivery (pull the release images; delete on uninstall) -----
+
+/// Whether the engine already has `image` locally.
+fn image_exists(engine: &str, image: &str) -> bool {
+    Command::new(engine)
+        .args(["image", "inspect", image])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// Make the harness and its matching proxy available at `version`: pull both from the
+/// registry, or (for `--local`) verify the make-built images exist. The box and its
+/// proxy are always the same version — a matched set. `registry` is the resolved base.
+pub(crate) fn provision_images(engine: &str, registry: &str, h: &Harness, version: &str) -> Result<()> {
+    if engine == "container" {
+        // Apple engine needs its background service up before any image op.
+        let _ = Command::new("container").args(["system", "start"]).status();
+    }
+    let harness_img = harness_image_ref(registry, h, version);
+    let proxy_img = proxy_image_ref(registry, version);
+
+    if version == LOCAL_VERSION {
+        for img in [harness_img.as_str(), proxy_img.as_str()] {
+            if !image_exists(engine, img) {
+                bail!("local image {img:?} not found — run `make build` first");
+            }
+        }
+        return Ok(());
+    }
+    // Pull the proxy first, then the harness; either failure aborts the install.
+    for img in [proxy_img.as_str(), harness_img.as_str()] {
+        eprintln!("vhrn: pulling {img}...");
+        pull_image(engine, img).with_context(|| format!("pulling {img}"))?;
+    }
+    Ok(())
+}
+
+/// The engine image-pull command. Both Docker and Apple container use `<engine> image
+/// pull` — Apple container has no top-level `pull` subcommand.
+fn pull_argv(image: &str) -> Vec<String> {
+    vec!["image".to_string(), "pull".into(), image.into()]
+}
+
+/// Pull an image with the engine, streaming progress to stderr (our stdout stays clean).
+fn pull_image(engine: &str, image: &str) -> Result<()> {
+    use std::os::fd::AsFd;
+    let err_out = Stdio::from(std::io::stderr().as_fd().try_clone_to_owned()?);
+    let status = Command::new(engine)
+        .args(pull_argv(image))
+        .stdout(err_out)
+        .stderr(Stdio::inherit())
+        .status()?;
+    if !status.success() {
+        bail!("{engine} pull failed for {image}");
+    }
+    Ok(())
+}
+
+/// The engine-specific image-delete command: Docker and Apple container differ
+/// (`image rm` vs `image delete`), so it is not a bare engine-name swap.
+fn remove_image_argv(engine: &str, image: &str) -> Vec<String> {
+    let verb = if engine == "docker" { "rm" } else { "delete" };
+    vec!["image".to_string(), verb.into(), image.into()]
+}
+
+/// Delete an image with the engine, streaming output to stderr.
+pub(crate) fn remove_image(engine: &str, image: &str) -> Result<()> {
+    use std::os::fd::AsFd;
+    let err_out = Stdio::from(std::io::stderr().as_fd().try_clone_to_owned()?);
+    let status = Command::new(engine)
+        .args(remove_image_argv(engine, image))
+        .stdout(err_out)
+        .stderr(Stdio::inherit())
+        .status()?;
+    if !status.success() {
+        bail!("{engine} image delete failed for {image}");
+    }
+    Ok(())
 }
 
 /// Trim, drop empties, de-duplicate, and sort a tool list so the content hash is
@@ -101,16 +183,6 @@ fn toolchain_dockerfile(base_image: &str, tools: &[String]) -> String {
 
 // ---- toolchain local build (only the derived toolchain image is built locally;
 // user-facing images are pulled) --------------------------------------------------
-
-/// Whether the engine already has `image` locally.
-fn image_exists(engine: &str, image: &str) -> bool {
-    Command::new(engine)
-        .args(["image", "inspect", image])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
-}
 
 /// The engine build command line (pure, for testing).
 fn build_argv(image: &str, dockerfile: &str, context: &str, extra: &[String]) -> Vec<String> {
@@ -252,5 +324,22 @@ mod tests {
             build_argv("img:tag", "/ctx/Dockerfile", "/ctx", &["--build-arg".into(), "K=V".into()]),
             ["build", "--tag", "img:tag", "--file", "/ctx/Dockerfile", "--build-arg", "K=V", "/ctx"]
         );
+    }
+
+    #[test]
+    fn pull_argv_layout() {
+        // Both engines pull via `<engine> image pull` — Apple container has no
+        // top-level `pull` subcommand.
+        assert_eq!(
+            pull_argv("ghcr.io/aravind-n/vhrn-claude:v0.2.0"),
+            ["image", "pull", "ghcr.io/aravind-n/vhrn-claude:v0.2.0"]
+        );
+    }
+
+    #[test]
+    fn remove_image_argv_per_engine() {
+        // Docker deletes with `image rm`; Apple container with `image delete`.
+        assert_eq!(remove_image_argv("docker", "vhrn-claude"), ["image", "rm", "vhrn-claude"]);
+        assert_eq!(remove_image_argv("container", "vhrn-claude"), ["image", "delete", "vhrn-claude"]);
     }
 }
