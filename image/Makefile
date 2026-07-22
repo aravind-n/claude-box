@@ -1,7 +1,5 @@
 # Build the container images the vhrn CLI drives, with Apple `container` or Docker.
-# The CLI itself is built and tested by cargo (`cargo build --release`, `cargo test`)
-# and released by .github/workflows/release.yml; this Makefile owns only the image
-# recipes plus a `test` convenience that runs both the Rust and proxy suites.
+# Run from the repo root as `make -C image` (or `cd image && make`).
 # Override the engine with ENGINE=docker.
 
 ENGINE ?= $(shell if command -v container >/dev/null 2>&1; then echo container; \
@@ -15,17 +13,17 @@ TAG ?= latest
 # Shared base image (debian + tooling + egress entrypoint, no agent).
 BASE_IMAGE ?= vhrn-base
 BASE_REF   := $(BASE_IMAGE):$(TAG)
-BASE_DIR   ?= image/base
+BASE_DIR   ?= base
 
 # The claude harness image (FROM vhrn-base + Claude Code).
 CLAUDE_IMAGE ?= vhrn-claude
 CLAUDE_REF   := $(CLAUDE_IMAGE):$(TAG)
-CLAUDE_DIR   ?= image/claude
+CLAUDE_DIR   ?= claude
 
-# The egress proxy sidecar image (see proxy/).
+# The egress proxy sidecar image; its source is one level up (see ../proxy).
 PROXY_IMAGE ?= vhrn-proxy
 PROXY_REF   := $(PROXY_IMAGE):$(TAG)
-PROXY_DIR   ?= proxy
+PROXY_DIR   ?= ../proxy
 
 # Match the container user to your host UID/GID (native Linux Docker only). Applied
 # to the base build, where the dev user is created.
@@ -43,17 +41,10 @@ RM_IMAGE := $(ENGINE) image delete
 endif
 
 .DEFAULT_GOAL := build
-.PHONY: build test build-base build-claude build-proxy clean
+.PHONY: build build-base build-claude build-proxy clean
 
 # Build every image the CLI needs: shared base, its egress proxy, and the claude harness.
 build: build-base build-proxy build-claude
-
-# CLI (cargo) lint + tests, plus the proxy (its own dependency-free module) tests.
-# Clippy runs first with -D warnings so any lint fails the suite.
-test:
-	cargo clippy --all-targets -- -D warnings
-	cargo test
-	cd $(PROXY_DIR) && go test ./...
 
 build-base:
 	$(ENGINE) build $(BUILD_ARGS) --tag $(BASE_REF) --file $(BASE_DIR)/Dockerfile $(BASE_DIR)
