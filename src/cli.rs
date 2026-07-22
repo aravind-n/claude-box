@@ -10,7 +10,7 @@ default-deny network egress.
 Usage:
   vhrn install <harness>                  build images, seed egress, add a shell alias
   vhrn uninstall <harness>                remove the alias/registry entry (--image drops the image)
-  vhrn <harness> [flags] [-- ] [args...]  run a harness in the box
+  vhrn <harness> [flags] [-- ] [args...]  run a harness in the container
   vhrn list                               show known and installed harnesses
   vhrn net <subcommand>                   manage the egress policy
   vhrn help                               show this help
@@ -39,7 +39,7 @@ net subcommands:
 
 Environment:
   VHRN_ENGINE        container engine (default: container, then docker)
-  VHRN_IMAGE         box image name (default: per-harness, e.g. vhrn-claude)
+  VHRN_IMAGE         container image name (default: per-harness, e.g. vhrn-claude)
   VHRN_PROXY_IMAGE   proxy image name (default: vhrn-proxy)
   VHRN_PROXY_PORT    proxy port (default: 8080)
 ";

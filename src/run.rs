@@ -1,4 +1,4 @@
-//! The run path — box preparation, engine selection, the proxy sidecar, and the
+//! The run path — container preparation, engine selection, the proxy sidecar, and the
 //! small host-side path/exec helpers the run and subcommand handlers share.
 
 use std::path::{Path, PathBuf};
@@ -15,7 +15,7 @@ use crate::config::Config;
 use crate::harness::Harness;
 use crate::net::Mode;
 
-/// Reproduce Claude's `projects/<key>` encoding so in-box history unifies with
+/// Reproduce Claude's `projects/<key>` encoding so in-container history unifies with
 /// native history: every character outside `[A-Za-z0-9]` becomes `-`
 /// (sed 's/[^A-Za-z0-9]/-/g').
 fn history_key(project: &str) -> String {
@@ -104,8 +104,8 @@ pub(crate) fn env_or(key: &str, def: &str) -> String {
     }
 }
 
-/// A running egress-proxy sidecar. The box's in-container firewall pins all egress to
-/// it; policy files live host-side and are mounted only into this sidecar.
+/// A running egress-proxy sidecar. The container's firewall pins all egress to it;
+/// policy files live host-side and are mounted only into this sidecar.
 #[derive(Clone)]
 pub(crate) struct Proxy {
     engine: String,
@@ -142,7 +142,7 @@ impl Proxy {
 
 /// Launch the detached proxy sidecar and resolve its IP (engines differ; retry until
 /// it has one). `policy_dir` is the host-side net policy dir, mounted into the proxy
-/// only — never the box.
+/// only — never the container.
 pub(crate) fn start_proxy(engine: &str, image: &str, policy_dir: &Path, port: &str) -> Result<(Proxy, String)> {
     let name = format!("vhrn-proxy-{}", std::process::id());
     let status = Command::new(engine)
@@ -241,23 +241,23 @@ pub(crate) fn stop_on_signal(proxy: Proxy) {
     });
 }
 
-/// The unprivileged box user's home; all container-side paths hang off it.
-const BOX_HOME: &str = "/home/dev";
+/// The unprivileged container user's home; all container-side paths hang off it.
+const CONTAINER_HOME: &str = "/home/dev";
 
 /// The resolved host-side state for one run: paths, engine/image, and the extra
 /// --volume/--env args assembled during preparation.
 #[derive(Default)]
-pub(crate) struct BoxConfig {
+pub(crate) struct ContainerConfig {
     pub engine: String,
     pub harness: Harness,
-    pub image: String,       // resolved box image ref (registry ref, or bare local name)
+    pub image: String,       // resolved container image ref (registry ref, or bare local name)
     pub version: String,     // installed image version (a tag, or "local")
     pub project: String,     // physical cwd (pwd -P)
     pub key: String,         // history key: [^A-Za-z0-9] -> '-'
     pub cache: String,       // ~/.cache/vhrn
-    pub state: String,       // <cache>/state/<harness> -> the box's persistent config dir
+    pub state: String,       // <cache>/state/<harness> -> the container's persistent config dir
     pub sandbox: String,     // <cache>/sandbox -> disposable synced config
-    pub config_dir: String,  // box config dir, e.g. /home/dev/.claude
+    pub config_dir: String,  // container config dir, e.g. /home/dev/.claude
     pub host_config: String, // host config dir, e.g. ~/.claude
     pub history: String,     // <host_config>/projects/<key>
     pub config: Config,      // merged defaults + global + project config
@@ -266,8 +266,8 @@ pub(crate) struct BoxConfig {
     pub term_env: Vec<String>,
 }
 
-impl BoxConfig {
-    /// Layer the disposable synced config, the box guide, and the shared history dir
+impl ContainerConfig {
+    /// Layer the disposable synced config, the container guide, and the shared history dir
     /// on top of the persistent state mount as nested bind mounts. Each is guarded on
     /// source existence so we never bind a missing path or turn a file mount into a
     /// stray directory.
@@ -300,7 +300,7 @@ impl BoxConfig {
 
 /// Perform all host-side preparation: resolve paths and engine, ready the persistent
 /// state store, sync the disposable config, and assemble the git/gh/terminal args.
-fn prepare_box(h: &Harness) -> Result<BoxConfig> {
+fn prepare_container(h: &Harness) -> Result<ContainerConfig> {
     let home = home_dir()?;
     let project = std::fs::canonicalize(std::env::current_dir()?)?; // pwd -P
     let project_s = project.to_string_lossy().into_owned();
@@ -315,7 +315,7 @@ fn prepare_box(h: &Harness) -> Result<BoxConfig> {
         conf.run.blocked_dirs.as_deref().unwrap_or(&[]),
     )?;
 
-    // Resolve the box image from the installed registry; VHRN_IMAGE overrides it.
+    // Resolve the container image from the installed registry; VHRN_IMAGE overrides it.
     let installed = crate::shell::installed_version(&config_dir_host, &h.name);
     let img_override = std::env::var("VHRN_IMAGE").unwrap_or_default();
     if installed.is_none() && img_override.is_empty() {
@@ -334,7 +334,7 @@ fn prepare_box(h: &Harness) -> Result<BoxConfig> {
     let sandbox = cache.join("sandbox");
     let history = host_config.join("projects").join(&key);
 
-    // The persistent, box-owned store — login/credentials/onboarding live here.
+    // The persistent, container-owned store — login/credentials/onboarding live here.
     let state = crate::persist::prepare_state(&home, &cache, h, &project_s)?;
 
     std::fs::create_dir_all(&sandbox)?;
@@ -348,7 +348,7 @@ fn prepare_box(h: &Harness) -> Result<BoxConfig> {
         crate::persist::copy_file_into(&host_config, &sandbox, f);
     }
 
-    Ok(BoxConfig {
+    Ok(ContainerConfig {
         engine,
         harness: h.clone(),
         image,
@@ -358,7 +358,7 @@ fn prepare_box(h: &Harness) -> Result<BoxConfig> {
         cache: cache.to_string_lossy().into_owned(),
         state: state.to_string_lossy().into_owned(),
         sandbox: sandbox.to_string_lossy().into_owned(),
-        config_dir: format!("{BOX_HOME}/{}", h.state_dir),
+        config_dir: format!("{CONTAINER_HOME}/{}", h.state_dir),
         host_config: host_config.to_string_lossy().into_owned(),
         history: history.to_string_lossy().into_owned(),
         config: conf,
@@ -371,7 +371,7 @@ fn prepare_box(h: &Harness) -> Result<BoxConfig> {
 /// Assemble the full engine run argv (pure; the golden test snapshots it). Point the
 /// agent at its config dir, mount the persistent state there, then layer the
 /// disposable synced config + history on top as nested mounts.
-fn box_run_args(cfg: &BoxConfig, f: &RunFlags, mode: Mode, ip: &str, port: &str) -> Vec<String> {
+fn container_run_args(cfg: &ContainerConfig, f: &RunFlags, mode: Mode, ip: &str, port: &str) -> Vec<String> {
     let proxy_url = format!("http://{ip}:{port}");
     let mut args = vec![
         "run".to_string(),
@@ -424,10 +424,10 @@ impl Drop for ProxyGuard {
     }
 }
 
-/// Seed the egress policy, start the proxy sidecar, then run the jailed box with all
-/// egress pinned to the proxy. The box run inherits the terminal; its exit status is
+/// Seed the egress policy, start the proxy sidecar, then run the jailed container with all
+/// egress pinned to the proxy. The container run inherits the terminal; its exit status is
 /// returned verbatim as the process exit code.
-fn start_box(mut cfg: BoxConfig, f: &RunFlags) -> Result<i32> {
+fn start_container(mut cfg: ContainerConfig, f: &RunFlags) -> Result<i32> {
     let port = env_or("VHRN_PROXY_PORT", "8080");
     let cfg_mode = cfg.config.net.mode.clone().unwrap_or_default();
     let mode = crate::net::resolve_mode(&cfg_mode, f.open_net);
@@ -438,12 +438,12 @@ fn start_box(mut cfg: BoxConfig, f: &RunFlags) -> Result<i32> {
     let config_allow = cfg.config.net.allow.clone().unwrap_or_default();
     let policy_dir = crate::net::prepare_policy(Path::new(&cfg.cache), mode, &config_allow, &f.extra_allow)?;
 
-    if let Err(e) = crate::persist::write_box_guide(
+    if let Err(e) = crate::persist::write_container_guide(
         Path::new(&cfg.host_config),
         Path::new(&cfg.sandbox),
         mode == Mode::Open,
     ) {
-        warn!("could not write box CLAUDE.md: {e}");
+        warn!("could not write container CLAUDE.md: {e}");
     }
 
     // Apple container needs its system service up; Docker manages its own daemon.
@@ -470,20 +470,20 @@ fn start_box(mut cfg: BoxConfig, f: &RunFlags) -> Result<i32> {
     if mode == Mode::Open {
         eprintln!("vhrn: network guard OFF (open) — all public egress allowed this session.");
         if !cfg.gh_env.is_empty() {
-            eprintln!("vhrn: a GitHub token is present in the box with the guard off.");
+            eprintln!("vhrn: a GitHub token is present in the container with the guard off.");
         }
     }
 
-    let args = box_run_args(&cfg, f, mode, &ip, &port);
+    let args = container_run_args(&cfg, f, mode, &ip, &port);
     let status = Command::new(&cfg.engine).args(&args).status()?;
     Ok(status.code().unwrap_or(1))
 }
 
-/// Run a harness in the box: prepare host-side state, then launch. Returns the agent's
+/// Run a harness in the container: prepare host-side state, then launch. Returns the agent's
 /// exit code (a non-zero agent is not a wrapper error).
 pub(crate) fn run_harness(h: &Harness, f: &RunFlags) -> Result<i32> {
-    let cfg = prepare_box(h)?;
-    start_box(cfg, f)
+    let cfg = prepare_container(h)?;
+    start_container(cfg, f)
 }
 
 #[cfg(test)]
@@ -534,14 +534,14 @@ mod tests {
         assert_eq!(first_ipv4("no address here\nsecond line"), "");
     }
 
-    // A BoxConfig fixture whose sandbox has skills/ + settings.json + CLAUDE.md, but
+    // A ContainerConfig fixture whose sandbox has skills/ + settings.json + CLAUDE.md, but
     // no commands/agents dirs or statusline.sh.
-    fn fixture_with_sandbox() -> (BoxConfig, std::path::PathBuf) {
+    fn fixture_with_sandbox() -> (ContainerConfig, std::path::PathBuf) {
         let sandbox = crate::testutil::temp_dir();
         std::fs::create_dir_all(sandbox.join("skills")).unwrap();
         std::fs::write(sandbox.join("settings.json"), "{}").unwrap();
         std::fs::write(sandbox.join("CLAUDE.md"), "guide").unwrap();
-        let cfg = BoxConfig {
+        let cfg = ContainerConfig {
             harness: Harness {
                 sync_dirs: vec!["skills".into(), "commands".into(), "agents".into()],
                 sync_files: vec!["settings.json".into(), "statusline.sh".into()],
@@ -579,13 +579,13 @@ mod tests {
     }
 
     #[test]
-    fn box_run_args_golden() {
+    fn container_run_args_golden() {
         let sandbox = crate::testutil::temp_dir();
         std::fs::create_dir_all(sandbox.join("skills")).unwrap();
         std::fs::write(sandbox.join("settings.json"), "{}").unwrap();
         std::fs::write(sandbox.join("CLAUDE.md"), "guide").unwrap();
 
-        let cfg = BoxConfig {
+        let cfg = ContainerConfig {
             engine: "container".into(),
             harness: Harness {
                 command: "claude".into(),
@@ -608,7 +608,7 @@ mod tests {
         };
         let f = RunFlags { open_net: false, extra_allow: vec![], rest: vec!["--model".into(), "opus".into()] };
 
-        let args = box_run_args(&cfg, &f, Mode::Enforce, "10.0.0.2", "8080");
+        let args = container_run_args(&cfg, &f, Mode::Enforce, "10.0.0.2", "8080");
 
         let skills = format!("{}:/home/dev/.claude/skills", sandbox.join("skills").display());
         let settings = format!("{}:/home/dev/.claude/settings.json", sandbox.join("settings.json").display());

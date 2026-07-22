@@ -4,7 +4,7 @@ set -euo pipefail
 # Phase 1 (root): install the default-deny egress firewall, then drop to the
 # unprivileged dev user by re-executing this script. dev has no sudo and no
 # capabilities, so once we hand off it cannot reach or alter these rules — the
-# firewall is enforced from outside dev's reach even though we share the box.
+# firewall is enforced from outside dev's reach even though we share the container.
 if [ "$(id -u)" = 0 ]; then
   if [ -n "${VHRN_PROXY_IP:-}" ]; then
     port="${VHRN_PROXY_PORT:-8080}"

@@ -2,21 +2,21 @@
 //! and persistence all read from. Adding an agent (codex, aider, …) is a spec here
 //! plus a thin `FROM vhrn-base` Dockerfile, not a fork of the CLI.
 
-/// Describes one coding agent vhrn can run in the box.
+/// Describes one coding agent vhrn can run in the container.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Harness {
     pub name: String,    // registry key and subcommand, e.g. "claude"
-    pub image: String,   // box image built for it, e.g. "vhrn-claude"
-    pub command: String, // in-box argv[0], e.g. "claude"
+    pub image: String,   // container image built for it, e.g. "vhrn-claude"
+    pub command: String, // in-container argv[0], e.g. "claude"
     pub alias: String,   // shell alias installed for it
 
     /// Default egress domains unioned into the host allowlist at install time.
     pub allow_domains: Vec<String>,
 
     // Persistence — the three home-dir buckets (see persist.rs): a
-    // box-owned state dir, bootstrap-only forwarded credentials, and disposable
+    // container-owned state dir, bootstrap-only forwarded credentials, and disposable
     // synced config layered back on top each run.
-    pub state_dir: String,        // box-home-relative persistent dir, e.g. ".claude"
+    pub state_dir: String,        // container-home-relative persistent dir, e.g. ".claude"
     pub config_dir_env: String,   // env var pointing the agent's config dir at state_dir
     pub host_config: String,      // host-home-relative dir to sync/bootstrap FROM
     pub sync_dirs: Vec<String>,   // disposable synced subdirs, e.g. skills/commands/agents

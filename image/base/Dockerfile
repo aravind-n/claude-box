@@ -1,9 +1,9 @@
-# vhrn-base: the shared box image — debian + CLI tooling + the tamper-proof egress
+# vhrn-base: the shared container image — debian + CLI tooling + the tamper-proof egress
 # entrypoint, but no agent. Each harness image is `FROM vhrn-base` plus its own CLI,
 # so the heavy, slow-changing layers are built and cached once.
 FROM debian:trixie-slim
 
-# Baked-in CLI tooling. Installed at build time as root, so the box ships fully
+# Baked-in CLI tooling. Installed at build time as root, so the container ships fully
 # equipped and never needs sudo at runtime. nftables is for the entrypoint's
 # egress firewall; ca-certificates for the https installers below.
 RUN apt-get update && apt-get install -y --no-install-recommends \

@@ -16,7 +16,7 @@ pub(crate) struct Config {
     pub net: NetConfig,
 }
 
-/// Guards where a box may launch. `blocked_dirs` are refused as an exact resolved
+/// Guards where a container may launch. `blocked_dirs` are refused as an exact resolved
 /// cwd (not a subtree), so ordinary projects under $HOME still run while jailing all
 /// of $HOME or / is prevented.
 #[derive(Debug, Clone, Default, PartialEq, serde::Deserialize)]
@@ -25,7 +25,7 @@ pub(crate) struct RunConfig {
     pub blocked_dirs: Option<Vec<String>>,
 }
 
-/// Tools provisioned into the box beyond the base image, e.g. "go@1.26", "node@22".
+/// Tools provisioned into the container beyond the base image, e.g. "go@1.26", "node@22".
 #[derive(Debug, Clone, Default, PartialEq, serde::Deserialize)]
 #[serde(default)]
 pub(crate) struct ToolchainsConfig {
@@ -110,7 +110,7 @@ pub(crate) fn check_blocked_dir(project: &str, home: &str, blocked: &[String]) -
 }
 
 /// Expand a leading `~` then resolve symlinks so a blocked entry can be compared
-/// against the physical cwd (which `prepare_box` has already resolved). Falls back to
+/// against the physical cwd (which `prepare_container` has already resolved). Falls back to
 /// a lexical clean when the path does not exist.
 fn resolve_dir(p: &str, home: &str) -> String {
     let expanded = if p == "~" {

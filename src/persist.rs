@@ -1,8 +1,8 @@
-//! The box-owned state store and the disposable config sync. `state/<harness>/` is
-//! the persistent store mounted as the box's config dir; host credentials seed it
-//! bootstrap-only (an in-box login is never clobbered), and `.claude.json` is merged
+//! The container-owned state store and the disposable config sync. `state/<harness>/` is
+//! the persistent store mounted as the container's config dir; host credentials seed it
+//! bootstrap-only (an in-container login is never clobbered), and `.claude.json` is merged
 //! in place to complete onboarding + trust this project without touching
-//! `oauthAccount`/other projects. The sandbox sync + box guide are re-derived each
+//! `oauthAccount`/other projects. The sandbox sync + container guide are re-derived each
 //! run and layered on top as nested mounts.
 
 use std::path::{Path, PathBuf};
@@ -14,7 +14,7 @@ use tracing::warn;
 use crate::harness::Harness;
 use crate::run::{look_path, set_mode};
 
-/// The persistent, box-owned store for one harness (`<cache>/state/<harness>`),
+/// The persistent, container-owned store for one harness (`<cache>/state/<harness>`),
 /// physically separate from the disposable sandbox so no config sync can reach it.
 fn host_state_dir(cache: &Path, harness: &str) -> PathBuf {
     cache.join("state").join(harness)
@@ -38,17 +38,17 @@ pub(crate) fn prepare_state(home: &Path, cache: &Path, h: &Harness, project: &st
 }
 
 /// Copy each host credentials file into the store, but only when the store's copy is
-/// absent. Bootstrap-only: once the box has its own (refreshed) credentials they are
-/// authoritative and never clobbered, so an in-box login is never overwritten.
+/// absent. Bootstrap-only: once the container has its own (refreshed) credentials they are
+/// authoritative and never clobbered, so an in-container login is never overwritten.
 fn bootstrap_credentials(home: &Path, state: &Path, h: &Harness) {
     for rel in &h.credentials {
         let dst = state.join(rel);
         if dst.is_file() {
-            continue; // box store already populated
+            continue; // container store already populated
         }
         let src = home.join(&h.host_config).join(rel);
         if !src.is_file() {
-            continue; // nothing on the host to inherit; the box will prompt to log in
+            continue; // nothing on the host to inherit; the container will prompt to log in
         }
         if let Err(e) = copy_file(&src, &dst) {
             warn!("could not seed {rel}: {e}");
@@ -58,17 +58,17 @@ fn bootstrap_credentials(home: &Path, state: &Path, h: &Harness) {
     }
 }
 
-/// Ensure the box-owned config JSON has onboarding completed and this project
-/// pre-trusted, without disturbing anything the box wrote (login/oauthAccount, other
+/// Ensure the container-owned config JSON has onboarding completed and this project
+/// pre-trusted, without disturbing anything the container wrote (login/oauthAccount, other
 /// projects). Numbers are preserved exactly (`arbitrary_precision`), and an unparseable
-/// box-owned file is left untouched rather than clobbered.
+/// container-owned file is left untouched rather than clobbered.
 fn seed_claude_config_json(path: &Path, project: &str) -> Result<()> {
     use serde_json::{Map, Value};
 
     let mut m: Map<String, Value> = match std::fs::read(path) {
         Ok(data) if !data.is_empty() => match serde_json::from_slice::<Value>(&data) {
             Ok(Value::Object(map)) => map,
-            _ => return Ok(()), // unparseable / not an object: leave the box's file untouched
+            _ => return Ok(()), // unparseable / not an object: leave the container's file untouched
         },
         _ => Map::new(), // absent or empty: fresh
     };
@@ -156,17 +156,17 @@ fn warn_skipped(name: &str) {
 /// Rebuild the sandbox CLAUDE.md fresh each run: the host global CLAUDE.md (if any)
 /// followed by a guard-aware section that tracks the net mode, so it never
 /// accumulates across runs.
-pub(crate) fn write_box_guide(real_claude: &Path, sandbox: &Path, open_net: bool) -> std::io::Result<()> {
+pub(crate) fn write_container_guide(real_claude: &Path, sandbox: &Path, open_net: bool) -> std::io::Result<()> {
     let mut b: Vec<u8> = Vec::new();
     if let Ok(data) = std::fs::read(real_claude.join("CLAUDE.md")) {
         b.extend_from_slice(&data);
     }
-    b.extend_from_slice(BOX_GUIDE_HEADER.as_bytes());
-    b.extend_from_slice(if open_net { BOX_GUIDE_OPEN } else { BOX_GUIDE_GUARD }.as_bytes());
+    b.extend_from_slice(CONTAINER_GUIDE_HEADER.as_bytes());
+    b.extend_from_slice(if open_net { CONTAINER_GUIDE_OPEN } else { CONTAINER_GUIDE_GUARD }.as_bytes());
     std::fs::write(sandbox.join("CLAUDE.md"), b)
 }
 
-const BOX_GUIDE_HEADER: &str = r"
+const CONTAINER_GUIDE_HEADER: &str = r"
 # vhrn environment
 
 You are running inside vhrn: a container jailed to this project with a
@@ -177,10 +177,10 @@ network egress guard. Adapt as follows:
   `npm i -g <pkg>` after `mise use -g node` for npm CLIs.
 ";
 
-const BOX_GUIDE_OPEN: &str =
+const CONTAINER_GUIDE_OPEN: &str =
     "- **Network egress is unrestricted this session** (the guard is off via `--open-net`).\n";
 
-const BOX_GUIDE_GUARD: &str = "- **Network egress is allowlisted (default-deny).** A blocked request fails with\n  an error naming the domain. You cannot change the allowlist from inside the\n  box; tell the user the exact host(s) and ask them to run\n  `vhrn net allow <host>` on the host, then retry — no restart is needed.\n";
+const CONTAINER_GUIDE_GUARD: &str = "- **Network egress is allowlisted (default-deny).** A blocked request fails with\n  an error naming the domain. You cannot change the allowlist from inside the\n  container; tell the user the exact host(s) and ask them to run\n  `vhrn net allow <host>` on the host, then retry — no restart is needed.\n";
 
 #[cfg(test)]
 mod tests {
@@ -212,10 +212,10 @@ mod tests {
         bootstrap_credentials(&home, &state, &h);
         assert_eq!(std::fs::read_to_string(state.join(".credentials.json")).unwrap(), "HOST");
 
-        // Box has since logged in: the host seed must not clobber it.
-        std::fs::write(state.join(".credentials.json"), "BOX").unwrap();
+        // Container has since logged in: the host seed must not clobber it.
+        std::fs::write(state.join(".credentials.json"), "existing").unwrap();
         bootstrap_credentials(&home, &state, &h);
-        assert_eq!(std::fs::read_to_string(state.join(".credentials.json")).unwrap(), "BOX");
+        assert_eq!(std::fs::read_to_string(state.join(".credentials.json")).unwrap(), "existing");
     }
 
     #[test]
