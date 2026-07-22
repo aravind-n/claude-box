@@ -21,7 +21,7 @@ back to `~/.claude/projects/<key>` so in-box and native sessions share history.
 
 - [Apple Container](https://github.com/apple/container) or Docker (auto-detected, `container` first)
 - `gh` on the host if you want GitHub auth forwarded (optional)
-- Go 1.23+ (only to build from source; the curl installer ships a prebuilt binary)
+- Rust 1.85+ / edition 2024 (only to build the CLI from source; the curl installer ships a prebuilt binary)
 
 Claude Code does **not** need to be installed on the host — the agent binary is baked
 into the box image.
@@ -32,8 +32,8 @@ Install the CLI, then install a harness (which pulls its images and adds a shell
 alias):
 
 ```sh
-make install          # build and install the vhrn binary to /usr/local/bin (needs sudo)
-vhrn install claude   # pull the claude + proxy images, seed egress, add a `claude` alias
+cargo install --path .   # build and install the vhrn binary to ~/.cargo/bin
+vhrn install claude      # pull the claude + proxy images, seed egress, add a `claude` alias
 ```
 
 Or grab a prebuilt binary, then install the harness:
@@ -139,7 +139,7 @@ domains. Edit `~/.cache/vhrn/net/allowlist` to change it.
 
 ## Adding a harness
 
-A harness is a spec (`internal/vhrn/harness.go`) plus a thin `FROM vhrn-base`
+A harness is a spec (`src/harness.rs`) plus a thin `FROM vhrn-base`
 Dockerfile under `image/<harness>/`, and an entry in the CI publish matrix
 (`.github/workflows/publish-images.yml`) so its image lands on ghcr. The spec carries
 the image name, in-box command, shell alias, default egress domains, and the
@@ -148,16 +148,15 @@ the CLI is required.
 
 ## Make targets
 
+The Makefile owns the container images and the test suite; the CLI binary itself is
+built by cargo (`cargo build --release`, `cargo install --path .`).
+
 | Target | Description |
 | --- | --- |
 | `make` / `make build` | Build all images (base + proxy + claude) |
-| `make binary` | Build the static `vhrn` CLI binary |
-| `make release` | Cross-compile release binaries into `out/dist/` |
-| `make test` | Run the unit tests (CLI + proxy) |
 | `make build-base` / `make build-claude` / `make build-proxy` | Build one image |
-| `make clean` | Remove the images and the built binary |
-| `make install` | Build and install the `vhrn` binary to `/usr/local/bin` (needs sudo) |
-| `make uninstall` | Remove the installed binary |
+| `make test` | clippy + the unit tests (CLI + proxy) |
+| `make clean` | Remove the images |
 | `make ENGINE=docker ...` | Force Docker instead of `container` |
 
 Day to day you don't need `make` — `vhrn install <harness>` pulls prebuilt images from
