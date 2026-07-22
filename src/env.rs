@@ -1,4 +1,4 @@
-//! Terminal, GitHub-token, and gitconfig env for the box run. Terminal identity
+//! Terminal, GitHub-token, and gitconfig env for the container run. Terminal identity
 //! crosses verbatim (Claude branches rendering on it, so it is never forced); the gh
 //! token is env-injected, never file-mounted; ~/.gitconfig is a disposable copy
 //! bind-mounted in.
@@ -68,7 +68,7 @@ pub(crate) fn gh_token_env() -> Vec<String> {
 }
 
 /// Copy the host ~/.gitconfig into the cache (dereferencing symlinks) and mount it at
-/// /home/dev/.gitconfig so in-box commits use the user's identity. A disposable copy,
+/// /home/dev/.gitconfig so in-container commits use the user's identity. A disposable copy,
 /// re-synced each run. Empty when absent.
 pub(crate) fn git_config_mount(home: &Path, cache: &Path) -> Vec<String> {
     let src = home.join(".gitconfig");

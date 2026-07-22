@@ -1,6 +1,6 @@
 //! Egress guard mode and the host-side policy files. The policy (allowlist, mode,
 //! deny-log) lives under `<cache>/net` and is mounted only into the proxy, never the
-//! box, so an in-box process can never widen its own egress; `vhrn net …` is the only
+//! container, so an in-container process can never widen its own egress; `vhrn net …` is the only
 //! path that mutates it. The mode string is a byte-level contract (mode file +
 //! `VHRN_NET`), so it round-trips through `as_str/from_str` unchanged.
 
@@ -82,7 +82,7 @@ pub(crate) fn seed_allowlist(cache: &Path, domains: &[String]) -> std::io::Resul
 
 // Seeded on first run; never clobbers later edits. 12 domains + 2 comment lines.
 const DEFAULT_ALLOWLIST: &str = r"# vhrn egress allowlist — one domain per line, matching the domain and its
-# subdomains. Edit freely, or run `vhrn net allow <domain>` while a box runs.
+# subdomains. Edit freely, or run `vhrn net allow <domain>` while a container runs.
 api.anthropic.com
 claude.ai
 platform.claude.com
@@ -232,8 +232,8 @@ fn next_tmp_id() -> u64 {
     CTR.fetch_add(1, Ordering::Relaxed)
 }
 
-/// Handle `vhrn net <subcommand>`: mutate the host-side egress policy the running box
-/// reads. This is the only path to that policy — the box has none.
+/// Handle `vhrn net <subcommand>`: mutate the host-side egress policy the running container
+/// reads. This is the only path to that policy — the container has none.
 pub(crate) fn run_net(args: &[String]) -> i32 {
     let home = match crate::run::home_dir() {
         Ok(h) => h,

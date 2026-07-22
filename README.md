@@ -5,17 +5,17 @@ Run coding agents inside a container jailed to the current project directory, wi
 is harness-agnostic (`vhrn install <harness>` / `vhrn <harness> …`), so more agents
 can be added as thin images.
 
-Only the current project is mounted into the box, so `~/.ssh`, your other projects,
+Only the current project is mounted into the container, so `~/.ssh`, your other projects,
 and the rest of your home directory stay outside it. Outbound traffic is limited to
 an allowlist. Between them, those two things let you run
 `--dangerously-skip-permissions` without a prompt injection being able to reach the
 rest of your machine or push your project somewhere it shouldn't go.
 
 The project is bind-mounted at its real path. Each harness keeps a persistent,
-box-owned state store (login, credentials, trust) so an in-box login sticks across
+container-owned state store (login, credentials, trust) so an in-container login sticks across
 runs; a disposable copy of your `~/.claude` config (skills, commands, agents,
 settings) is synced in on each run and layered on top, and session history is written
-back to `~/.claude/projects/<key>` so in-box and native sessions share history.
+back to `~/.claude/projects/<key>` so in-container and native sessions share history.
 
 ## Requirements
 
@@ -24,7 +24,7 @@ back to `~/.claude/projects/<key>` so in-box and native sessions share history.
 - Rust 1.85+ / edition 2024 (only to build the CLI from source; the curl installer ships a prebuilt binary)
 
 Claude Code does **not** need to be installed on the host — the agent binary is baked
-into the box image.
+into the container image.
 
 ## Install
 
@@ -84,15 +84,15 @@ agent's own flags.
 ## Login and state persistence
 
 Each harness has a persistent store at `~/.cache/vhrn/state/<harness>/`, mounted as
-the agent's config dir inside the box (Claude via `CLAUDE_CONFIG_DIR`). A login,
+the agent's config dir inside the container (Claude via `CLAUDE_CONFIG_DIR`). A login,
 refreshed credentials, and trust state live there and survive across runs — one login
 serves every project. The store is authoritative once populated: your host login is
-copied in **only** to bootstrap an empty store, so an in-box login is never
+copied in **only** to bootstrap an empty store, so an in-container login is never
 overwritten.
 
 The container stays ephemeral (`--rm`) — a fresh, tamper-proof firewall is installed
 on every boot. Persistence is a property of what's mounted, not of container lifetime.
-(Caveat: an in-box token refresh doesn't flow back to the host.)
+(Caveat: an in-container token refresh doesn't flow back to the host.)
 
 ## Configuration
 
@@ -106,7 +106,7 @@ Optional TOML config, global under per-project. Precedence: CLI flags > `./.vhrn
 blocked_dirs = ["~", "/"]
 
 [toolchains]
-# Provisioned into the box with mise, as a derived image cached by tool set.
+# Provisioned into the container with mise, as a derived image cached by tool set.
 tools = ["go@1.26", "node@22"]
 
 [net]
@@ -116,14 +116,14 @@ mode  = "enforce"     # enforce | report | open
 
 ## Network egress guard
 
-Every run starts a small proxy sidecar. The box's firewall routes every outbound
+Every run starts a small proxy sidecar. The container's firewall routes every outbound
 connection through that proxy, and the proxy only allows allowlisted domains.
 Everything else, including direct DNS, is refused. A blocked request fails with the
 domain named, like `blocked by vhrn egress policy: example.com`.
 
 The policy lives on the host, under `~/.cache/vhrn/net/`, and is mounted into the
-proxy but never into the box. That is what stops an in-box process from widening its
-own egress, even under skip-permissions. Edit it from the host while a box is running
+proxy but never into the container. That is what stops an in-container process from widening its
+own egress, even under skip-permissions. Edit it from the host while a container is running
 and the proxy picks up the change on its next request, no restart needed:
 
 ```sh
@@ -142,7 +142,7 @@ domains. Edit `~/.cache/vhrn/net/allowlist` to change it.
 A harness is a spec (`src/harness.rs`) plus a thin `FROM vhrn-base`
 Dockerfile under `image/<harness>/`, and an entry in the CI publish matrix
 (`.github/workflows/publish-images.yml`) so its image lands on ghcr. The spec carries
-the image name, in-box command, shell alias, default egress domains, and the
+the image name, in-container command, shell alias, default egress domains, and the
 persistence descriptors (state dir, synced config, bootstrap credentials). No fork of
 the CLI is required.
 
@@ -169,7 +169,7 @@ images on a git tag; `VHRN_REGISTRY` overrides the registry the CLI pulls from.
 What it protects:
 
 - Your host filesystem. Secrets and your other projects are never mounted, so nothing
-  inside the box can read or damage them.
+  inside the container can read or damage them.
 - Against casual exfiltration. Default-deny egress stops a prompt injection from
   POSTing your source to an outside server; it can only reach the domains you have
   allowed.
@@ -180,21 +180,21 @@ What it doesn't:
   doesn't terminate TLS, so it can't stop data being pushed to an allowed domain (a
   repo on `github.com`, for instance) or domain-fronted behind an allowed CDN.
 - Sessions run with `--open-net` (or `net.mode = "open"`), which turn the guard off.
-- A container escape under Docker, where the box shares the host's kernel. Apple
-  `container` puts each box in its own lightweight VM, a stronger boundary.
+- A container escape under Docker, where the container shares the host's kernel. Apple
+  `container` puts each container in its own lightweight VM, a stronger boundary.
 
 ## Notes
 
-- There is no sudo inside the box; removing it is what keeps the egress firewall
+- There is no sudo inside the container; removing it is what keeps the egress firewall
   tamper-proof. Install tools in user space instead: `mise use -g <tool>` for
   runtimes, `uv tool install <pkg>` for Python CLIs — or declare them under
   `[toolchains]` in your config.
 - `gh` auth is forwarded as an env token (`$GH_TOKEN` or `$GITHUB_TOKEN`, else
-  `gh auth token`), which covers git-over-HTTPS inside the box. SSH remotes stay
+  `gh auth token`), which covers git-over-HTTPS inside the container. SSH remotes stay
   unauthenticated. Under an open guard, the wrapper warns that a token is present.
 - The disposable config copy under `~/.cache/vhrn/sandbox/` is re-synced every run, so
   edits to it don't survive — change your real `~/.claude` on the host instead. The
   persistent store under `~/.cache/vhrn/state/` is separate and is never touched by the
   sync.
-- Your host `~/.gitconfig` is copied in so in-box commits use your name and email.
+- Your host `~/.gitconfig` is copied in so in-container commits use your name and email.
   Change the host file if you want a change to stick.
