@@ -196,7 +196,7 @@ fn write_alias_block(path: &Path, block: &str) -> std::io::Result<()> {
 }
 
 /// The basename of `$SHELL` (bash/zsh/fish), or `None` when unset.
-fn current_shell() -> Option<String> {
+pub(crate) fn current_shell() -> Option<String> {
     let sh = std::env::var("SHELL").ok()?;
     if sh.is_empty() {
         return None;
