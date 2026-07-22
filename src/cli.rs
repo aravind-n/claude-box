@@ -3,6 +3,7 @@
 //! later port phase; for now `run` prints the usage text.
 
 use anyhow::{Result, bail};
+use tracing::{error, info, warn};
 
 // Subcommand-first help. Bare `vhrn` prints it; a harness runs as `vhrn <harness>
 // …`. Transcribed from the Go usageText (internal/vhrn/usage.go).
@@ -72,12 +73,12 @@ pub fn run(args: &[String]) -> i32 {
                         // Wrapper-level failures get a message; the agent's own non-zero
                         // exit is returned verbatim above.
                         Err(e) => {
-                            eprintln!("vhrn: {e}");
+                            error!("{e}");
                             1
                         }
                     },
                     Err(e) => {
-                        eprintln!("vhrn: {e}");
+                        error!("{e}");
                         2
                     }
                 }
@@ -96,7 +97,7 @@ fn run_list(_args: &[String]) -> i32 {
     let home = match crate::run::home_dir() {
         Ok(h) => h,
         Err(e) => {
-            eprintln!("vhrn: {e}");
+            error!("{e}");
             return 1;
         }
     };
@@ -135,8 +136,8 @@ fn run_install(args: &[String]) -> i32 {
         version = crate::image::LOCAL_VERSION.to_string();
     }
     let Some(h) = crate::harness::lookup_harness(&name) else {
-        eprintln!(
-            "vhrn: unknown harness {name:?} (known: {})",
+        error!(
+            "unknown harness {name:?} (known: {})",
             crate::harness::harness_names().join(", ")
         );
         return 2;
@@ -144,37 +145,37 @@ fn run_install(args: &[String]) -> i32 {
     let home = match crate::run::home_dir() {
         Ok(h) => h,
         Err(e) => {
-            eprintln!("vhrn: {e}");
+            error!("{e}");
             return 1;
         }
     };
     let engine = match crate::run::detect_engine() {
         Ok(e) => e,
         Err(e) => {
-            eprintln!("vhrn: {e}");
+            error!("{e}");
             return 1;
         }
     };
 
     if let Err(e) = crate::image::provision_images(&engine, &crate::image::registry_base(), &h, &version) {
-        eprintln!("vhrn: {e}");
+        error!("{e}");
         return 1;
     }
 
     // Union base defaults + this harness's domains into the host allowlist,
     // append-if-missing so later user edits are respected.
     if let Err(e) = crate::net::seed_allowlist(&crate::run::vhrn_cache(&home), &h.allow_domains) {
-        eprintln!("vhrn: {e}");
+        error!("{e}");
         return 1;
     }
 
     let config_dir = crate::shell::vhrn_config_dir(&home);
     if let Err(e) = crate::shell::add_installed(&config_dir, &name, &version) {
-        eprintln!("vhrn: {e}");
+        error!("{e}");
         return 1;
     }
     if let Err(e) = crate::shell::sync_aliases(&config_dir, &home, crate::shell::current_shell().as_deref()) {
-        eprintln!("vhrn: warning: could not update shell aliases: {e}");
+        warn!("could not update shell aliases: {e}");
     }
 
     println!(
@@ -204,7 +205,7 @@ fn run_uninstall(args: &[String]) -> i32 {
     let home = match crate::run::home_dir() {
         Ok(h) => h,
         Err(e) => {
-            eprintln!("vhrn: {e}");
+            error!("{e}");
             return 1;
         }
     };
@@ -215,11 +216,11 @@ fn run_uninstall(args: &[String]) -> i32 {
     let version = crate::shell::installed_version(&config_dir, &name);
 
     if let Err(e) = crate::shell::remove_installed(&config_dir, &name) {
-        eprintln!("vhrn: {e}");
+        error!("{e}");
         return 1;
     }
     if let Err(e) = crate::shell::sync_aliases(&config_dir, &home, crate::shell::current_shell().as_deref()) {
-        eprintln!("vhrn: warning: could not update shell aliases: {e}");
+        warn!("could not update shell aliases: {e}");
     }
 
     let mut alias = name.clone();
@@ -227,23 +228,23 @@ fn run_uninstall(args: &[String]) -> i32 {
         Some(h) => {
             alias.clone_from(&h.alias);
             if rm_image && version.is_none() {
-                eprintln!("vhrn: {name:?} was not installed; no image to remove");
+                warn!("{name:?} was not installed; no image to remove");
             } else if rm_image && let Ok(engine) = crate::run::detect_engine() {
                 let img = crate::image::harness_image_ref(
                     &crate::image::registry_base(),
                     &h,
                     version.as_deref().unwrap_or(""),
                 );
-                eprintln!("vhrn: removing image {img}...");
+                info!("removing image {img}...");
                 if let Err(e) = crate::image::remove_image(&engine, &img) {
-                    eprintln!("vhrn: warning: could not remove image {img}: {e}");
+                    warn!("could not remove image {img}: {e}");
                 }
             }
         }
         // Unknown harness: nothing to alias, and no image ref we can form to remove.
         None => {
             if rm_image {
-                eprintln!("vhrn: warning: unknown harness {name:?}; cannot remove its image");
+                warn!("unknown harness {name:?}; cannot remove its image");
             }
         }
     }

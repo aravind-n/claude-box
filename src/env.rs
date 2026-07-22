@@ -6,6 +6,8 @@
 use std::path::Path;
 use std::process::Command;
 
+use tracing::warn;
+
 use crate::run::look_path;
 
 /// Build the terminal `--env` args: TERM falls back to xterm-256color; the rest cross
@@ -79,7 +81,7 @@ pub(crate) fn git_config_mount(home: &Path, cache: &Path) -> Vec<String> {
         .and_then(|()| std::fs::copy(&src, &dst).map(|_| ()))
         .is_err()
     {
-        eprintln!("vhrn: warning: could not copy .gitconfig");
+        warn!("could not copy .gitconfig");
         return Vec::new();
     }
     vec![

@@ -7,6 +7,8 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use tracing::error;
+
 use crate::run::set_mode;
 
 /// The egress guard mode for a run.
@@ -236,7 +238,7 @@ pub(crate) fn run_net(args: &[String]) -> i32 {
     let home = match crate::run::home_dir() {
         Ok(h) => h,
         Err(e) => {
-            eprintln!("vhrn: {e}");
+            error!("{e}");
             return 1;
         }
     };
@@ -271,7 +273,7 @@ pub(crate) fn run_net(args: &[String]) -> i32 {
                 return 2;
             }
             if let Err(e) = np.append_missing_atomic(rest) {
-                eprintln!("vhrn: {e}");
+                error!("{e}");
                 return 1;
             }
             println!("allowed: {}", rest.join(" "));

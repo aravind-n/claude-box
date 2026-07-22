@@ -9,6 +9,7 @@ use std::time::Duration;
 use anyhow::{Result, bail};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
+use tracing::warn;
 
 use crate::cli::RunFlags;
 use crate::config::Config;
@@ -432,7 +433,7 @@ fn start_box(mut cfg: BoxConfig, f: &RunFlags) -> Result<i32> {
     let cfg_mode = cfg.config.net.mode.clone().unwrap_or_default();
     let mode = crate::net::resolve_mode(&cfg_mode, f.open_net);
     if !f.open_net && !cfg_mode.is_empty() && cfg_mode != mode.as_str() {
-        eprintln!("vhrn: warning: invalid net mode {cfg_mode:?}; using {}", mode.as_str());
+        warn!("invalid net mode {cfg_mode:?}; using {}", mode.as_str());
     }
 
     let config_allow = cfg.config.net.allow.clone().unwrap_or_default();
@@ -443,7 +444,7 @@ fn start_box(mut cfg: BoxConfig, f: &RunFlags) -> Result<i32> {
         Path::new(&cfg.sandbox),
         mode == Mode::Open,
     ) {
-        eprintln!("vhrn: warning: could not write box CLAUDE.md: {e}");
+        warn!("could not write box CLAUDE.md: {e}");
     }
 
     // Apple container needs its system service up; Docker manages its own daemon.
@@ -465,6 +466,8 @@ fn start_box(mut cfg: BoxConfig, f: &RunFlags) -> Result<i32> {
     let _guard = ProxyGuard(proxy.clone());
     stop_on_signal(proxy);
 
+    // Security banner for --open-net: a direct stderr write, not a tracing event, so
+    // no RUST_LOG level can silence the token-exposure caution.
     if mode == Mode::Open {
         eprintln!("vhrn: network guard OFF (open) — all public egress allowed this session.");
         if !cfg.gh_env.is_empty() {

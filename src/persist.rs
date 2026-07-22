@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::Result;
+use tracing::warn;
 
 use crate::harness::Harness;
 use crate::run::{look_path, set_mode};
@@ -31,7 +32,7 @@ pub(crate) fn prepare_state(home: &Path, cache: &Path, h: &Harness, project: &st
         && !h.config_json.is_empty()
         && let Err(e) = seed_claude_config_json(&state.join(&h.config_json), project)
     {
-        eprintln!("vhrn: warning: could not seed {}: {e}", h.config_json);
+        warn!("could not seed {}: {e}", h.config_json);
     }
     Ok(state)
 }
@@ -50,7 +51,7 @@ fn bootstrap_credentials(home: &Path, state: &Path, h: &Harness) {
             continue; // nothing on the host to inherit; the box will prompt to log in
         }
         if let Err(e) = copy_file(&src, &dst) {
-            eprintln!("vhrn: warning: could not seed {rel}: {e}");
+            warn!("could not seed {rel}: {e}");
             continue;
         }
         let _ = set_mode(&dst, 0o600); // credentials stay private
@@ -144,12 +145,12 @@ pub(crate) fn copy_file_into(real: &Path, sandbox: &Path, name: &str) {
         return;
     }
     if copy_file(&src, &sandbox.join(name)).is_err() {
-        eprintln!("vhrn: warning: could not copy '{name}'");
+        warn!("could not copy '{name}'");
     }
 }
 
 fn warn_skipped(name: &str) {
-    eprintln!("vhrn: warning: some '{name}' entries were skipped (broken symlink?)");
+    warn!("some '{name}' entries were skipped (broken symlink?)");
 }
 
 /// Rebuild the sandbox CLAUDE.md fresh each run: the host global CLAUDE.md (if any)
