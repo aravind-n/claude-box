@@ -65,6 +65,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
+          pattern: vhrn-*
           merge-multiple: true
       - name: Checksums
         working-directory: dist
