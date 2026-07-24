@@ -72,10 +72,12 @@ Core behavioral invariants — keep these intact:
   only the agent tag the run path resolves from. `vhrn update` re-pulls a floating install; a
   daily `harness-images.yml` cron rebuilds a harness when its agent updates — both independent
   of a CLI release.
-- **Config precedence: flags > `./.vhrn.toml` > `~/.config/vhrn/config.toml` > defaults**
-  (`src/config.rs`, `toml` crate). `blocked_dirs` matches the resolved cwd **exactly** (not
-  subtree), default `["~","/"]`. `toolchains.tools` resolves to a content-addressed derived
-  image (`vhrn-<h>-tc-<hash>`, `FROM` the harness image + `mise use -g`), cached by tag.
+- **Config precedence: flags > `~/.config/vhrn/config.toml` > defaults** (`src/config.rs`,
+  `toml` crate). Config is **host-owned only** — nothing is read from the project directory, so
+  repo content can never configure the jail. `blocked_dirs` matches the resolved cwd
+  **exactly** (not subtree), default `["~","/"]`. `toolchains.tools` resolves to a
+  content-addressed derived image (`vhrn-<h>-tc-<hash>`, `FROM` the harness image +
+  `mise use -g`), cached by tag.
 - **Shell aliases and the installed registry are host state.** `install`/`uninstall` mutate
   `~/.config/vhrn/installed` and regenerate reversible marker-delimited alias blocks in
   bash/zsh/fish rc files (existing files + the current shell's). `command <name>`/`\<name>`

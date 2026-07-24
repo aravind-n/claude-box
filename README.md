@@ -42,8 +42,9 @@ Wrapper flags (`--open-net`, `--allow`) go after the harness name, before the ag
 
 ## Configuration
 
-Optional TOML, global then per-project. Precedence: CLI flags > `./.vhrn.toml` >
-`~/.config/vhrn/config.toml` > built-in defaults.
+Optional TOML in `~/.config/vhrn/config.toml`. Precedence: CLI flags >
+`~/.config/vhrn/config.toml` > built-in defaults. Config is host-owned only — vhrn reads
+nothing from the project directory, so a cloned repo can never reconfigure the jail.
 
 ```toml
 [run]

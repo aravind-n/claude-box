@@ -33,7 +33,7 @@ Procedures for cutting releases and refreshing images. All driven from
 `0.MINOR.PATCH`; the leading zero stays until 1.0.
 
 - **Minor** if a user must change something they wrote or typed: a renamed or removed flag
-  or subcommand, a `.vhrn.toml` key, a state-file format, or what an image tag means.
+  or subcommand, a `config.toml` key, a state-file format, or what an image tag means.
 - **Patch** otherwise: fixes, additive flags, new allowlist domains, base tooling, docs.
 
 ## Refresh a harness image
