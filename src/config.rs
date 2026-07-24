@@ -1,7 +1,8 @@
-//! Merged vhrn configuration. Precedence is project `.vhrn.toml` over global
-//! `config.toml` over built-in defaults (CLI flags win over all of it, applied in
-//! the run path). Each optional field is an `Option` so an unset key falls through
-//! to a lower-precedence layer.
+//! Merged vhrn configuration. Precedence is CLI flags over the global `config.toml`
+//! (under `~/.config/vhrn`) over built-in defaults (flags applied in the run path).
+//! Config is host-owned only — nothing is read from the project directory, so a cloned
+//! repo can never configure the jail. Each optional field is an `Option` so an unset
+//! key falls through to a lower-precedence layer.
 
 use std::path::Path;
 
@@ -75,16 +76,15 @@ fn merge_config(base: Config, over: Config) -> Config {
     out
 }
 
-/// Read and merge the config layers in precedence order — built-in defaults, then
-/// the global `config.toml` under `config_dir`, then the project's `.vhrn.toml`.
-/// Missing files are not an error; a malformed one is. `config_dir` is injected (the
-/// caller resolves it from XDG) so this is testable without touching process env.
-pub(crate) fn load_config(config_dir: &Path, project: &Path) -> Result<Config> {
+/// Read the global config: built-in defaults overlaid with `config.toml` under
+/// `config_dir`. A missing file is not an error; a malformed one is. `config_dir` is
+/// injected (the caller resolves it from XDG) so this is testable without touching process
+/// env. Nothing is read from the project directory — config is host-owned, so repo content
+/// cannot configure the jail.
+pub(crate) fn load_config(config_dir: &Path) -> Result<Config> {
     let mut cfg = default_config();
-    for path in [config_dir.join("config.toml"), project.join(".vhrn.toml")] {
-        if let Some(c) = read_config_file(&path)? {
-            cfg = merge_config(cfg, c);
-        }
+    if let Some(c) = read_config_file(&config_dir.join("config.toml"))? {
+        cfg = merge_config(cfg, c);
     }
     Ok(cfg)
 }
@@ -170,40 +170,34 @@ mod tests {
 
     #[test]
     fn load_config_no_files_yields_defaults() {
-        let cfg = load_config(&temp_dir(), &temp_dir()).unwrap();
+        let cfg = load_config(&temp_dir()).unwrap();
         assert_eq!(cfg, default_config());
     }
 
     #[test]
-    fn load_config_precedence() {
+    fn load_config_global_over_defaults() {
         let config_dir = temp_dir();
         std::fs::write(
             config_dir.join("config.toml"),
             "[toolchains]\ntools = [\"go@1.26\"]\n[net]\nmode = \"report\"\nallow = [\"global.example\"]\n",
         )
         .unwrap();
-        let project = temp_dir();
-        std::fs::write(
-            project.join(".vhrn.toml"),
-            "[net]\nallow = [\"project.example\"]\n",
-        )
-        .unwrap();
 
-        let cfg = load_config(&config_dir, &project).unwrap();
-        assert_eq!(cfg.net.allow, Some(vec!["project.example".to_string()])); // project overrides
-        assert_eq!(cfg.net.mode, Some("report".to_string())); // inherited from global
+        let cfg = load_config(&config_dir).unwrap();
+        assert_eq!(cfg.net.allow, Some(vec!["global.example".to_string()])); // from global config
+        assert_eq!(cfg.net.mode, Some("report".to_string()));
         assert_eq!(cfg.toolchains.tools, Some(vec!["go@1.26".to_string()]));
         assert_eq!(
             cfg.run.blocked_dirs,
             Some(vec!["~".to_string(), "/".to_string()])
-        ); // default
+        ); // unset key falls through to the default
     }
 
     #[test]
     fn load_config_malformed_is_error() {
-        let project = temp_dir();
-        std::fs::write(project.join(".vhrn.toml"), "this is = not valid = toml").unwrap();
-        assert!(load_config(&temp_dir(), &project).is_err());
+        let config_dir = temp_dir();
+        std::fs::write(config_dir.join("config.toml"), "this is = not valid = toml").unwrap();
+        assert!(load_config(&config_dir).is_err());
     }
 
     #[test]

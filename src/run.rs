@@ -49,8 +49,8 @@ pub(crate) fn vhrn_cache(home: &Path) -> PathBuf {
     vhrn_cache_from(home, std::env::var("XDG_CACHE_HOME").ok().as_deref())
 }
 
-/// Whether `name` is an executable on `$PATH` (approximates exec.LookPath): a file
-/// with any execute bit set in some PATH directory.
+/// Whether `name` is an executable on `$PATH`: a file with any execute bit set in some
+/// PATH directory.
 pub(crate) fn look_path(name: &str) -> bool {
     use std::os::unix::fs::PermissionsExt;
     let Some(paths) = std::env::var_os("PATH") else {
@@ -326,7 +326,7 @@ fn prepare_container(h: &Harness) -> Result<ContainerConfig> {
 
     // Config first: a blocked cwd must abort before any host-side work.
     let config_dir_host = crate::shell::vhrn_config_dir(&home);
-    let conf = crate::config::load_config(&config_dir_host, &project)?;
+    let conf = crate::config::load_config(&config_dir_host)?;
     crate::config::check_blocked_dir(
         &project_s,
         &home.to_string_lossy(),
