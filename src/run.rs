@@ -326,7 +326,7 @@ fn prepare_container(h: &Harness) -> Result<ContainerConfig> {
 
     // Config first: a blocked cwd must abort before any host-side work.
     let config_dir_host = crate::shell::vhrn_config_dir(&home);
-    let conf = crate::config::load_config(&config_dir_host, &project)?;
+    let conf = crate::config::load_config(&config_dir_host)?;
     crate::config::check_blocked_dir(
         &project_s,
         &home.to_string_lossy(),
