@@ -6,6 +6,24 @@ All notable changes to vhrn are recorded here. The format follows
 
 ## Unreleased
 
+## 0.2.0 - 2026-07-24
+
+### Security
+
+- Remove the project-level `./.vhrn.toml` config layer, a sandbox-escape vector. It was read
+  host-side before the container launched, so a `.vhrn.toml` committed to any repository was
+  trusted and obeyed on the first `vhrn <harness>` run in it — able to disable the egress guard
+  (`net.mode = "open"`) or permanently widen the host allowlist (`net.allow`). `git clone
+  <repo> && vhrn <harness>` was the whole exploit.
+
+### Changed
+
+- Configuration is host-owned only. Precedence is now flags > `~/.config/vhrn/config.toml` >
+  defaults; nothing is read from the project directory. Per-project settings that lived in
+  `./.vhrn.toml` (`toolchains.tools`, `net.allow`, `net.mode`, `run.blocked_dirs`) must move
+  into the global config — a host-owned `[project."<path>"]` form is planned (see
+  `docs/plans/per-project-config.md`).
+
 ## 0.1.0 - 2026-07-23
 
 ### Added
