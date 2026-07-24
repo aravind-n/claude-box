@@ -14,7 +14,9 @@ Procedures for cutting releases and refreshing images. All driven from
 
 ## Cut a release
 
-1. Promote the `Unreleased` section of `CHANGELOG.md` to `## X.Y.Z` with today's date.
+1. Promote the `Unreleased` section of `CHANGELOG.md` to `## [X.Y.Z]` with today's date, and
+   update the link-reference block at the bottom (repoint `[unreleased]` at `vX.Y.Z...HEAD` and
+   add a `[X.Y.Z]` compare line) — the file follows [Keep a Changelog](https://keepachangelog.com).
 2. Bump `version` in `Cargo.toml` to `X.Y.Z` — the release workflow fails if the tag and
    `Cargo.toml` disagree.
 3. `cargo build --release` to refresh `Cargo.lock`.
@@ -27,6 +29,10 @@ Procedures for cutting releases and refreshing images. All driven from
 6. Approve the `release` environment on the run's page in Actions. On approval it publishes
    the images and the GitHub Release, which becomes "latest stable" — `install.sh` picks it
    up by default.
+
+The Release body is taken from the tag's own `## X.Y.Z` section of `CHANGELOG.md` (step 1),
+not from GitHub's auto-generated PR list — so an empty or missing section **fails the publish
+job**. Re-running the job after fixing the changelog corrects the body in place.
 
 ## Choosing the number
 
