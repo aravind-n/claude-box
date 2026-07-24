@@ -69,9 +69,11 @@ Core behavioral invariants — keep these intact:
   proxy (`proxy_tag` derives it: a nightly CLI → nightly proxy, a `vX.Y.Z` CLI → its own tag).
   Override the registry with `VHRN_REGISTRY`. `--local` uses `make`-built images (version
   `local`). The installed registry (`~/.config/vhrn/installed`, `name <tag>` per line) records
-  only the agent tag the run path resolves from. `vhrn update` re-pulls a floating install; a
-  daily `harness-images.yml` cron rebuilds a harness when its agent updates — both independent
-  of a CLI release.
+  only the agent tag the run path resolves from. `vhrn update` queries the registry (OCI
+  tags-list / manifest digest over the anonymous bearer-challenge flow, `src/registry.rs`) and
+  re-pulls a floating install only when a newer agent is published — never pulling just to
+  diff; an unreachable registry is a hard error, not a blind pull. A daily `harness-images.yml`
+  cron rebuilds a harness when its agent updates — both independent of a CLI release.
 - **Config precedence: flags > `~/.config/vhrn/config.toml` > defaults** (`src/config.rs`,
   `toml` crate). Config is **host-owned only** — nothing is read from the project directory, so
   repo content can never configure the jail. `blocked_dirs` matches the resolved cwd

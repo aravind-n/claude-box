@@ -12,7 +12,7 @@ Usage:
   vhrn uninstall <harness>                remove the alias/registry entry (--image drops the image)
   vhrn <harness> [flags] [-- ] [args...]  run a harness in the container
   vhrn list                               show known and installed harnesses
-  vhrn update [<harness>...]              re-pull installed harnesses to the latest agent
+  vhrn update [<harness>...]              re-pull installed harnesses when a newer agent exists
   vhrn net <subcommand>                   manage the egress policy
   vhrn help                               show this help
   vhrn --version                          print the version
@@ -259,57 +259,94 @@ fn run_update(args: &[String]) -> i32 {
         }
     };
     let registry = crate::image::registry_base();
+    let mut ok = true;
     for ih in &targets {
-        update_one(&engine, &registry, ih);
+        ok &= update_one(&engine, &registry, ih);
     }
-    0
+    i32::from(!ok)
 }
 
 /// Update one installed harness in place, printing a one-line result. Pinned/local installs
-/// are reported and skipped; a floating one re-pulls and reports the version label move —
-/// no container is started to name the version.
-fn update_one(engine: &str, registry: &str, ih: &crate::shell::InstalledHarness) {
+/// are reported and skipped; a floating install is checked against the registry and pulled
+/// only when it is actually behind — never pulled just to discover it is already current.
+/// Returns false when the check couldn't run (registry unreachable) or the pull failed, so
+/// the caller exits non-zero.
+fn update_one(engine: &str, registry: &str, ih: &crate::shell::InstalledHarness) -> bool {
     let (name, version) = (&ih.name, &ih.version);
     let Some(h) = crate::harness::lookup_harness(name) else {
         warn!("{name:?} is not a known harness; skipping");
-        return;
+        return true;
     };
     if version == crate::image::LOCAL_VERSION {
         println!("  {name:<12} local build — rebuild with `make -C image`");
-        return;
+        return true;
     }
     if version != "latest" && version != "nightly" {
         println!("  {name:<12} pinned at {version} — `vhrn install {name}` to return to latest");
-        return;
+        return true;
     }
 
     let harness_img = crate::image::harness_image_ref(registry, &h, version);
-    let id_before = crate::image::image_id(engine, &harness_img);
-    let ver_before = crate::image::image_version_label(engine, &harness_img);
 
-    if let Err(e) = crate::image::provision_images(engine, registry, &h, version) {
-        error!("  {name:<12} update failed: {e}");
-        return;
-    }
-
-    let id_after = crate::image::image_id(engine, &harness_img);
-    let ver_after = crate::image::image_version_label(engine, &harness_img);
-
-    // An unmoved digest means the re-pull brought nothing new.
-    if id_before.is_some() && id_before == id_after {
-        if let Some(v) = ver_after {
-            println!("  {name:<12} {v} — already current");
-        } else {
-            println!("  {name:<12} already current ({version})");
+    // Nightly has no X.Y.Z tag, so compare the published :nightly digest to the local one.
+    if version == "nightly" {
+        let Some(remote) = crate::registry::remote_manifest_digest(registry, &h.image, "nightly")
+        else {
+            report_unreachable(name, registry);
+            return false;
+        };
+        if crate::image::image_manifest_digest(engine, &harness_img).as_deref() == Some(&*remote) {
+            println!("  {name:<12} nightly — already current");
+            return true;
         }
-        return;
+        return pull_update(engine, registry, &h, version, || {
+            println!("  {name:<12} nightly updated");
+        });
     }
-    match (ver_before, ver_after) {
-        (Some(b), Some(a)) if b == a => println!("  {name:<12} {a} — already current"),
-        (Some(b), Some(a)) => println!("  {name:<12} {b} → {a}"),
-        (_, Some(a)) => println!("  {name:<12} now {a}"),
-        (_, None) => println!("  {name:<12} updated ({version})"),
+
+    // Latest: pull only if the newest published version is strictly ahead of the installed one.
+    let Some(newest) = crate::registry::newest_published_version(registry, &h.image) else {
+        report_unreachable(name, registry);
+        return false;
+    };
+    match crate::image::image_version_label(engine, &harness_img).as_deref() {
+        Some(cur) if crate::registry::update_available(&newest, cur) == Some(false) => {
+            println!("  {name:<12} {cur} — already current");
+            true
+        }
+        Some(cur) => pull_update(engine, registry, &h, version, || {
+            println!("  {name:<12} {cur} → {newest}");
+        }),
+        // No readable local version: pull to the newest and name it.
+        None => pull_update(engine, registry, &h, version, || {
+            println!("  {name:<12} now {newest}");
+        }),
     }
+}
+
+/// Pull the harness (and its matching proxy) for an available update, then report it via
+/// `on_success`. Returns false if the pull failed.
+fn pull_update(
+    engine: &str,
+    registry: &str,
+    h: &crate::harness::Harness,
+    version: &str,
+    on_success: impl FnOnce(),
+) -> bool {
+    if let Err(e) = crate::image::provision_images(engine, registry, h, version) {
+        error!("  {:<12} update failed: {e}", h.name);
+        return false;
+    }
+    on_success();
+    true
+}
+
+/// A registry install we couldn't check (offline / registry down / non-OCI). Emits a
+/// guaranteed user-facing line so the failure is visible even if logging is redirected.
+fn report_unreachable(name: &str, registry: &str) {
+    eprintln!("vhrn: cannot check {name} for updates — registry {registry} unreachable");
+    // TODO: once tracing is hardened (e.g. a file sink), also error!(<underlying cause>) so the
+    // network error is recorded to the log without duplicating this line on stderr today.
 }
 
 /// Drop a harness from the installed registry and regenerate the shell aliases so its

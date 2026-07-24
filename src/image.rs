@@ -223,6 +223,39 @@ fn first_sha256(s: &str) -> Option<String> {
     (hex.len() >= 12).then(|| format!("sha256:{hex}"))
 }
 
+/// The registry manifest digest (`sha256:…`) a local image was pulled at — the same digest
+/// the tag resolves to in the registry, for the nightly digest check. This is *not* `image_id`:
+/// Docker's `.Id` is the config digest and would never match a tag's `Docker-Content-Digest`,
+/// so Docker reads `RepoDigests[0]` (`repo@sha256:…`) instead; Apple `container` already
+/// exposes the manifest digest as inspect's first `sha256:` (`configuration.descriptor.digest`).
+/// None if the image is absent or was never pulled from a registry (empty `RepoDigests`).
+pub(crate) fn image_manifest_digest(engine: &str, image: &str) -> Option<String> {
+    if engine == "docker" {
+        let out = Command::new("docker")
+            .args([
+                "image",
+                "inspect",
+                "-f",
+                "{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}",
+                image,
+            ])
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        return first_sha256(&String::from_utf8_lossy(&out.stdout));
+    }
+    let out = Command::new("container")
+        .args(["image", "inspect", image])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    first_sha256(&String::from_utf8_lossy(&out.stdout))
+}
+
 /// The OCI label CI stamps the agent version into; the host reads it back to name a
 /// harness image's version without running it.
 const VERSION_LABEL: &str = "org.opencontainers.image.version";
@@ -491,6 +524,11 @@ mod tests {
         assert_eq!(
             first_sha256(r#"{"Id":"sha256:abcdef0123456789"}"#),
             Some("sha256:abcdef0123456789".to_string())
+        );
+        // A docker RepoDigests entry — what image_manifest_digest reads on the nightly path.
+        assert_eq!(
+            first_sha256("ghcr.io/aravind-n/vhrn-claude@sha256:c0a8ccd395b3848a"),
+            Some("sha256:c0a8ccd395b3848a".to_string())
         );
         assert_eq!(first_sha256("no digest here"), None);
         assert_eq!(first_sha256("sha256:abc"), None); // fewer than 12 hex chars

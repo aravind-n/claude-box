@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `vhrn update` now asks the registry whether a newer agent is published and re-pulls only when
+  one is, instead of re-pulling every time and diffing image digests to find out. An up-to-date
+  harness reports `already current` with no pull (and no `pulling …` noise). The check is a
+  metadata-only query over the standard OCI bearer-challenge flow, so it works on any registry,
+  not just GHCR. A registry that can't be reached is now a hard error (non-zero exit) rather
+  than a blind re-pull — you can't update an offline machine.
+
 ### Fixed
 
 - GitHub Release notes are taken from the release's `CHANGELOG.md` section rather than
