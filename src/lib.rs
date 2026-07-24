@@ -11,6 +11,7 @@ mod image;
 mod logging;
 mod net;
 mod persist;
+mod registry;
 mod run;
 mod shell;
 
